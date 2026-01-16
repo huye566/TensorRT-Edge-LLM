@@ -46,7 +46,7 @@ if("${EMBEDDED_TARGET}" STREQUAL "auto-thor")
   if(CUDA_VERSION VERSION_LESS 13.0)
     set(CMAKE_CUDA_ARCHITECTURES 101)
   else()
-    set(CMAKE_CUDA_ARCHITECTURES 110)
+    set_ifndef(CMAKE_CUDA_ARCHITECTURES 110)
   endif()
   set(CUDA_DIR
       /usr/local/cuda/targets/aarch64-linux

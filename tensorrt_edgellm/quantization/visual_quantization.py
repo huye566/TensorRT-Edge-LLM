@@ -28,6 +28,7 @@ from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import \
 from transformers.models.qwen2_vl.modeling_qwen2_vl import \
     Qwen2VisionTransformerPretrainedModel
 from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLVisionModel
+from transformers.models.qwen3_vl_moe.modeling_qwen3_vl_moe import Qwen3VLMoeVisionModel
 
 from ..visual_models.internvl3_model import InternVLVisionModel
 from ..visual_models.phi4mm_model import Phi4MMVisionModel
@@ -137,6 +138,7 @@ def get_visual_calib_dataloader(
 
     if isinstance(model, (
             Qwen3VLVisionModel,
+            Qwen3VLMoeVisionModel,
             Qwen2_5_VisionTransformerPretrainedModel,
             Qwen2VisionTransformerPretrainedModel,
     )):
@@ -195,7 +197,7 @@ def get_visual_calib_dataloader(
                     inputs["window_attention_mask"] = window_attention_mask
                     inputs["window_index"] = window_index
                     inputs["reverse_window_index"] = reverse_window_index
-                elif isinstance(self.model, Qwen3VLVisionModel):
+                elif isinstance(self.model, (Qwen3VLVisionModel, Qwen3VLMoeVisionModel)):
                     fast_pos_embed_idx, fast_pos_embed_weight = self.model.fast_pos_embed_interpolate_optimized(
                         grid_thw)
                     inputs["fast_pos_embed_idx"] = fast_pos_embed_idx
@@ -228,7 +230,7 @@ def get_visual_calib_dataloader(
 
 def quantize_visual(model, precision, processor, dataset_dir="lmms-lab/MMMU"):
     assert isinstance(
-        model, (Qwen3VLVisionModel, Qwen2_5_VisionTransformerPretrainedModel,
+        model, (Qwen3VLVisionModel, Qwen3VLMoeVisionModel, Qwen2_5_VisionTransformerPretrainedModel,
                 Qwen2VisionTransformerPretrainedModel, InternVLVisionModel,
                 Phi4MMVisionModel)), f"Invalid model type {type(model)}"
     assert precision in [

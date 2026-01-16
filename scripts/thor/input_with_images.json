@@ -1,0 +1,25 @@
+{
+    "batch_size": 1,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "top_k": 1,
+    "max_generate_length": 1024,
+    "default_system_prompt": "You are a helpful assistant.",
+    "messages": [
+        {
+            "user": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回",
+            "system": "You are a helpful assistant.",
+            "images": ["/workspace/app/datasets/text_recog.jpg"]
+        },
+        {
+            "user": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回",
+            "system": "You are a helpful assistant.",
+            "images": ["/workspace/app/datasets/text_recog.jpg"]
+        },
+        {
+            "user": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回",
+            "system": "You are a helpful assistant.",
+            "images": ["/workspace/app/datasets/text_recog.jpg"]
+        }
+    ]
+}

@@ -235,6 +235,13 @@ struct StageTimingData
         return gpuTimesMs.empty() ? 0.0f : getTotalGpuTimeMs() / gpuTimesMs.size();
     }
 
+    //! @brief Get time of latest run
+    //! @return Latest run time in milliseconds
+    float getLatestTimeMs() const
+    {
+        return gpuTimesMs.empty() ? 0.0f : gpuTimesMs.back();
+    }
+
     //! @brief Get total number of runs
     //! @return Run count
     int64_t getTotalRuns() const

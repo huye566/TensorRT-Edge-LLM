@@ -23,3 +23,18 @@ target_include_directories(
   llm_inference PRIVATE ${COMMON_INCLUDE_DIRS}
                         ${CMAKE_SOURCE_DIR}/examples/utils)
 add_cross_build_link_options(llm_inference)
+
+add_library(vlm_infer SHARED vlm_infer.cpp)
+target_link_libraries(vlm_infer PRIVATE edgellmCore edgellmTokenizer
+                                        exampleUtils commonLibraryExt)
+target_include_directories(vlm_infer PRIVATE ${COMMON_INCLUDE_DIRS}
+                                             ${CMAKE_SOURCE_DIR}/examples/utils)
+add_cross_build_link_options(vlm_infer)
+
+add_executable(vlm_infer_test vlm_infer_test.cpp)
+target_link_libraries(vlm_infer_test PRIVATE ${CUDART_LIB} edgellmCore
+                                             exampleUtils)
+target_include_directories(
+  vlm_infer_test PRIVATE ${COMMON_INCLUDE_DIRS}
+                         ${CMAKE_SOURCE_DIR}/examples/utils)
+add_cross_build_link_options(vlm_infer_test)

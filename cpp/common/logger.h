@@ -69,8 +69,27 @@ struct SourceLocation
 class EdgeLLMLogger : public nvinfer1::ILogger
 {
 public:
+    // 日志等级枚举
+    // typedef enum {
+    //     VLM_LOG_LEVEL_NONE = 0,
+    //     VLM_LOG_LEVEL_DEBUG = 1,
+    //     VLM_LOG_LEVEL_INFO = 2,
+    //     VLM_LOG_LEVEL_WARN = 3,
+    //     VLM_LOG_LEVEL_ERROR = 4
+    // } VLMLogLevel;
+    typedef void (*LogCallback)(int level, char const* text);
+
     EdgeLLMLogger() = default;
     ~EdgeLLMLogger() = default;
+
+    /*!
+     * @brief Pass in an external logging callback
+     * @param cb external logging callback
+     */
+    void set_log_callback(LogCallback cb)
+    {
+        mCallback = cb;
+    }
 
     /*!
      * @brief nvinfer1::ILogger interface implementation for TensorRT integration
@@ -99,6 +118,22 @@ public:
 
         // Format and output the message
         std::string formattedMsg = formatLogEntry(level, msg, loc);
+
+        if (mCallback)
+        {
+            int l = 0;
+            switch (level)
+            {
+            case nvinfer1::ILogger::Severity::kVERBOSE: l = 1; break;
+            case nvinfer1::ILogger::Severity::kINFO: l = 2; break;
+            case nvinfer1::ILogger::Severity::kWARNING: l = 3; break;
+            case nvinfer1::ILogger::Severity::kERROR: l = 4; break;
+            default: l = 2; break;
+            }
+            mCallback(l, formattedMsg.c_str());
+            return;
+        }
+
         std::ostream& stream = (level <= nvinfer1::ILogger::Severity::kWARNING) ? std::cerr : std::cout;
         stream << formattedMsg << std::endl;
     }
@@ -193,6 +228,7 @@ private:
     bool mShowTimestamp = true;
     bool mShowLocation = true;
     bool mShowFunction = true;
+    LogCallback mCallback = nullptr;
 
     bool shouldLog(nvinfer1::ILogger::Severity level) const
     {

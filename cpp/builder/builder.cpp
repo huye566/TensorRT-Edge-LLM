@@ -603,7 +603,8 @@ bool LLMBuilder::setupVLMProfiles(nvinfer1::IOptimizationProfile* contextProfile
     result &= setOptimizationProfile(generationProfile, binding_names::kImageEmbeds, createDims({1, imageHiddenSize}),
         createDims({1, imageHiddenSize}), createDims({1, imageHiddenSize}));
 
-    if (mModelConfig["model"].get<std::string>() == "qwen3vltext")
+    if (mModelConfig["model"].get<std::string>() == "qwen3vltext" || 
+        mModelConfig["model"].get<std::string>() == "qwen3vlmoetext")
     {
         for (int32_t idx = 0; idx < network->getNbInputs(); idx++)
         {

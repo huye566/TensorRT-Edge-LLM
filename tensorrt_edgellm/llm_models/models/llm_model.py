@@ -172,7 +172,7 @@ class EdgeLLMModel(nn.Module):
 
             if deepstack_visual_embeds is not None and idx in range(
                     len(deepstack_visual_embeds)):
-                assert self.config.model_type == "qwen3_vl_text", "Qwen3VLTextModel is required for deepstack processing"
+                assert self.config.model_type in ["qwen3_vl_text", "qwen3_vl_moe_text"], "Qwen3VLTextModel or Qwen3VLMoeTextModel is required for deepstack processing"
                 hidden_states = Qwen3VLDeepStackProcess(
                     self.embed_tokens.num_embeddings)(
                         input_ids,

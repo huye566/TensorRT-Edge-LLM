@@ -25,10 +25,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CUDA_STANDARD 17)
 
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations -Wall
+# -Werror=return-type -g -O0")
 set(CMAKE_CXX_FLAGS
     "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations -Wall -Werror=return-type")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Wno-deprecated-declarations")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined")
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 macro(set_ifndef var val)
   if(NOT DEFINED ${var})
@@ -70,6 +73,10 @@ find_library(
   HINTS ${CUDA_DIR} ${CUDA_TARGET_DIR}
   PATH_SUFFIXES lib lib64 lib/stubs)
 
+find_library(CUBLAS_LIB cublas 
+  HINTS ${CUDA_DIR} ${CUDA_TARGET_DIR}
+  PATH_SUFFIXES lib lib64 lib/stubs)
+
 find_path(
   CURAND_KERNEL_INCLUDE_DIR
   NAMES curand_kernel.h
@@ -108,11 +115,22 @@ find_library(
   HINTS ${TRT_PACKAGE_DIR}
   PATH_SUFFIXES lib lib64 x86_64-linux-gnu)
 
+find_library(
+  NVINFER_PLUGIN_LIB nvinfer_plugin
+  HINTS ${TRT_PACKAGE_DIR}
+  PATH_SUFFIXES lib lib64 ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
+
+if(NOT NVINFER_PLUGIN_LIB)
+  message(WARNING "nvinfer_plugin library not found, plugin support may be limited")
+endif()
+
 set(COMMON_INCLUDE_DIRS
     ${CUDA_INCLUDE_DIR}
     ${TRT_INCLUDE_DIR}
     ${CMAKE_SOURCE_DIR}/cpp
     ${CMAKE_SOURCE_DIR}/examples/multimodal
+    ${CMAKE_SOURCE_DIR}/3rdParty/cutlass/include
+    ${CMAKE_SOURCE_DIR}/3rdParty/cutlass/tools/util/include
     ${CMAKE_SOURCE_DIR}/3rdParty/nlohmannJson/include
     ${CMAKE_SOURCE_DIR}/3rdParty/stb)
 
@@ -124,6 +142,26 @@ target_link_libraries(commonLibraryExt INTERFACE ${NVINFER_LIB} ${CUDART_LIB})
 target_link_options(commonLibraryExt INTERFACE
                     "-Wl,--unresolved-symbols=ignore-in-shared-libs")
 
+option(BUILD_UNIT_TESTS "Enable building unit tests" OFF)
+option(BUILD_KERNELS_TESTS "Enable building kernel tests" OFF)
+option(ENABLE_MOE_DEBUG "Enable MoE debug printing" OFF)
+option(USE_MOE_CUTLASS "Use MoE cutlass" OFF)
+
+if(ENABLE_MOE_DEBUG)
+    add_definitions(-DENABLE_MOE_DEBUG)
+    message(STATUS "MoE debug printing enabled")
+else()
+    message(STATUS "MoE debug printing disabled")
+endif()
+
+if(USE_MOE_CUTLASS)
+    add_definitions(-DUSE_MOE_CUTLASS)
+    message(STATUS "Use MoE cutlass")
+else()
+    message(STATUS "Not Use MoE cutlass")
+endif()
+
+
 # Build Core libraries of the project. attentionPlugin shared library and
 # edgellmCore/edgellmTokenizer/edgellmBuilder static library will be generated.
 add_subdirectory(cpp)
@@ -131,13 +169,15 @@ add_subdirectory(cpp)
 # Build C++ examples to showcase the usage
 add_subdirectory(examples)
 
-option(BUILD_UNIT_TESTS "Enable building unit tests" OFF)
-
-if(BUILD_UNIT_TESTS)
+if(BUILD_UNIT_TESTS OR BUILD_KERNELS_TESTS)
   set(BUILD_GMOCK
       OFF
       CACHE BOOL "Disable Google Mock")
   add_subdirectory(${CMAKE_SOURCE_DIR}/3rdParty/googletest)
+  include_directories(${CMAKE_SOURCE_DIR}/3rdParty/googletest/googletest/include)
+endif()
+
+if(BUILD_UNIT_TESTS)
   file(GLOB_RECURSE UNIT_TESTS_SRCS ${CMAKE_SOURCE_DIR}/unittests/*.cpp
        ${CMAKE_SOURCE_DIR}/unittests/*.cu)
   add_executable(unitTest ${UNIT_TESTS_SRCS})
@@ -149,4 +189,8 @@ if(BUILD_UNIT_TESTS)
   target_link_libraries(unitTest PRIVATE gtest gtest_main edgellmCore
                                          ${CUDART_LIB} ${CUDA_DRIVER_LIB})
   add_cross_build_link_options(unitTest)
+endif()
+
+if(BUILD_KERNELS_TESTS)
+  add_subdirectory(${CMAKE_SOURCE_DIR}/tests_cpp)
 endif()

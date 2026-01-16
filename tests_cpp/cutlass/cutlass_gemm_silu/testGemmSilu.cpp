@@ -1,0 +1,166 @@
+#include <iostream>
+#include <vector>
+#include <cuda_runtime.h>
+#include "utils/cuda_check.h"
+#include "gemm_silu_bench.h"
+
+void print_gemm_silu_results_table(const std::vector<TestResult>& results) {
+    const int col1 = 15;  // 测试用例
+    const int col2 = 10;  // 数据类型
+    const int col3 = 15;  // 操作类型
+    const int col4 = 25;  // 矩阵大小
+    const int col5 = 8;   // 循环次数
+    const int col6 = 15;  // 平均时间(ms)
+    const int col7 = 20;  // 平均性能(GFLOPS)
+    const int col8 = 20;  // 峰值性能(GFLOPS)
+    const int col9 = 18;  // 带宽(GB/s)
+    const int col10 = 15; // 最大绝对误差
+    const int col11 = 20; // 验证元素数
+    const int col12 = 10; // 正确性
+    const int offset = 0;
+    
+    int total_width = col1 + col2 + col3 + col4 + col5 + col6 + col7 + col8 + col9 + col10 + col11 + col12;
+    total_width = total_width - offset * 12;
+
+    // 打印表头
+    std::cout << "\n";
+    std::cout << std::string(total_width, '=') << "\n";
+    std::cout << "Cutlass GEMM-SiLU 性能测试结果汇总\n";
+    std::cout << std::string(total_width, '=') << "\n";
+
+    std::cout << std::left
+              << std::setw(col1) << "TestCase"
+              << std::setw(col2) << "DataType"
+              << std::setw(col3) << "Operation"
+              << std::setw(col4) << "MatrixSize"
+              << std::setw(col5) << "Loop"
+              << std::setw(col6) << "MeanTime (ms)"
+              << std::setw(col7) << "MeanPerf (TFLOPS)"
+              << std::setw(col8) << "PeakPerf (TFLOPS)"
+              << std::setw(col9) << "Bandwidth (GB/s)"
+              << std::setw(col10) << "MaxAbsError"
+              << std::setw(col11) << "VerifiedElements"
+              << std::setw(col12) << "Check"
+              << "\n";
+    
+    std::cout << std::string(total_width, '-') << "\n";
+    
+    // 打印每一行数据
+    for (const auto& result : results) {
+        std::ostringstream size_oss;
+        size_oss << "(" << result.M << "," << result.K << ")*(" << result.K << "," << result.N << ")";
+        
+        // 格式化验证元素数显示
+        std::ostringstream verify_oss;
+        int total_elements = result.M * result.N;
+        if (result.verify_count < total_elements) {
+            verify_oss << result.verify_count << "/" << total_elements;
+        } else {
+            verify_oss << result.verify_count;
+        }
+        
+        std::cout << std::left
+                  << std::setw(col1 - offset) << result.test_case
+                  << std::setw(col2 - offset) << result.data_type
+                  << std::setw(col3 - offset) << result.operation
+                  << std::setw(col4 - offset) << size_oss.str()
+                  << std::setw(col5 - offset) << result.iterations
+                  << std::setw(col6 - offset) << std::fixed << std::setprecision(3) << result.avg_time_ms
+                  << std::setw(col7 - offset) << std::fixed << std::setprecision(3) << result.avg_tflops
+                  << std::setw(col8 - offset) << std::fixed << std::setprecision(3) << result.max_tflops
+                  << std::setw(col9 - offset) << std::fixed << std::setprecision(2) << result.avg_bandwidth_gbs
+                  << std::setw(col10 - offset) << std::scientific << std::setprecision(2) << result.max_abs_error
+                  << std::setw(col11 - offset) << verify_oss.str();
+
+        if (result.passed) {
+            std::cout << std::setw(col12 - offset) << "✓ PASS";
+        } else {
+            std::ostringstream fail_oss;
+            fail_oss << "✗ FAIL (" << result.error_count << ")";
+            std::cout << std::setw(col12 - offset) << fail_oss.str();
+        }
+        std::cout << "\n";
+    }
+    
+    std::cout << std::string(total_width, '-') << "\n";
+    
+    // 打印统计信息
+    int total_tests = results.size();
+    int passed_tests = std::count_if(results.begin(), results.end(), [](const TestResult& r) { return r.passed; });
+    
+    std::cout << "\n统计信息:\n";
+    std::cout << "总测试数: " << total_tests << "\n";
+    std::cout << "通过测试: " << passed_tests << "\n";
+    std::cout << "失败测试: " << (total_tests - passed_tests) << "\n";
+    std::cout << "通过率: " << std::fixed << std::setprecision(1) 
+              << (static_cast<double>(passed_tests) / total_tests * 100) << "%\n";
+    
+    // 计算平均性能
+    double avg_performance_fp16 = 0.0;
+    double avg_performance_fp32 = 0.0;
+    int count_fp16 = 0, count_fp32 = 0;
+    
+    for (const auto& result : results) {
+        if (result.data_type == "FP16") {
+            avg_performance_fp16 += result.avg_tflops;
+            count_fp16++;
+        } else if (result.data_type == "FP32") {
+            avg_performance_fp32 += result.avg_tflops;
+            count_fp32++;
+        }
+    }
+    
+    if (count_fp16 > 0) {
+        avg_performance_fp16 /= count_fp16;
+        std::cout << "FP16平均性能: " << std::fixed << std::setprecision(3) << avg_performance_fp16 << " TFLOPS\n";
+    }
+    
+    if (count_fp32 > 0) {
+        avg_performance_fp32 /= count_fp32;
+        std::cout << "FP32平均性能: " << std::fixed << std::setprecision(3) << avg_performance_fp32 << " TFLOPS\n";
+    }
+    
+    // 打印验证策略说明
+    std::cout << "\n验证策略说明:\n";
+    std::cout << "1. 当输出向量长度 > 10000 时，只计算和验证前10000个元素\n";
+    std::cout << "2. 容差设置: FP16为1e-2，FP32为1e-3\n";
+    std::cout << "3. 操作: GEMM + SiLU激活函数 (silu(x) = x * sigmoid(x))\n";
+}
+
+int main(int argc, char** argv) {
+    print_device_info(2);
+
+    srand(2026);
+    struct TestCase {
+        int M;
+        int N;
+        int K;
+        std::string description;
+    };
+    
+    std::vector<TestCase> test_cases = {
+        {1, 6144, 2048, "<1,2048>*<2048,6144>"},
+        {530, 6144, 2048, "<530,2048>*<2048,6144>"}
+    };
+    
+    std::vector<TestResult> all_test_results;
+    int iterations = 10;
+    
+    // 测试半精度
+    for (const auto& test_case : test_cases) {
+        std::cout << "测试用例: " << test_case.description << " (FP16)\n";
+        TestResult result = benchmark_gemm_silu_half(test_case.M, test_case.N, test_case.K, iterations);
+        all_test_results.push_back(result);
+    }
+    
+    // 测试单精度
+    for (const auto& test_case : test_cases) {
+        std::cout << "测试用例: " << test_case.description << " (FP32)\n";
+        TestResult result = benchmark_gemm_silu_float(test_case.M, test_case.N, test_case.K, iterations);
+        all_test_results.push_back(result);
+    }
+    
+    print_gemm_silu_results_table(all_test_results);
+    std::cout << "\n\nAll GEMM-SiLU tests completed!\n";
+    return 0;
+}

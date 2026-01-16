@@ -55,7 +55,7 @@ from ..llm_models.layers.int4_gemm_plugin import (
 from ..llm_models.model_utils import (is_gptq_model,
                                       is_incompatible_chat_template_model,
                                       load_eagle3_draft_model, load_llm_model,
-                                      load_reduced_vocab_map)
+                                      load_reduced_vocab_map, _get_model_architectures)
 from .config_export import export_llm_config
 from .onnx_utils import export_onnx
 
@@ -183,7 +183,7 @@ def create_dummy_inputs(model: nn.Module, is_eagle_base: bool,
                                    device=device)
         base_inputs['image_embeds'] = image_embeds
 
-    if model_config.model_type == "qwen3_vl_text":
+    if model_config.model_type in ["qwen3_vl_text", "qwen3_vl_moe_text"]:
         deepstack_visual_embeds = [
             torch.randn(image_token_len,
                         hidden_size,
@@ -249,6 +249,18 @@ def replace_torch_quant_linear_with_int4_plugin(model: nn.Module) -> nn.Module:
     return model
 
 
+def replace_torch_moe_module_with_moe_fp16_plugin(model: nn.Module, model_dir: str) -> nn.Module:
+    from ..llm_models.layers.moe_plugin import (
+            register_moe_fp16_plugin_onnx_symbolic_functions,
+            replace_moe_fp16_module_with_plugin)
+    if not is_gptq_model(model):
+        if _get_model_architectures(model_dir) == "SDQwen3VLMoeForConditionalGeneration":
+            print("Detected SDQwen3VLMoeForConditionalGeneration model, replacing TorchMoE with MoeFp16PluginModule")
+            register_moe_fp16_plugin_onnx_symbolic_functions()
+            model = replace_moe_fp16_module_with_plugin(model)
+    return model
+
+
 def export_model_to_onnx(model: nn.Module, dummy_inputs: Dict[str, Any],
                          output_dir: str, is_eagle_base: bool,
                          is_eagle_draft: bool,
@@ -303,7 +315,7 @@ def export_model_to_onnx(model: nn.Module, dummy_inputs: Dict[str, Any],
         if use_prompt_tuning:
             base_inputs.append(dummy_inputs['image_embeds'])
 
-        if model_config.model_type == "qwen3_vl_text":
+        if model_config.model_type in ["qwen3_vl_text", "qwen3_vl_moe_text"]:
             base_inputs.append(dummy_inputs['deepstack_visual_embeds'])
 
         inputs = tuple(base_inputs)
@@ -330,7 +342,7 @@ def export_model_to_onnx(model: nn.Module, dummy_inputs: Dict[str, Any],
         if use_prompt_tuning:
             input_names.append('image_embeds')
 
-        if model_config.model_type == "qwen3_vl_text":
+        if model_config.model_type in ["qwen3_vl_text", "qwen3_vl_moe_text"]:
             input_names += [f'deepstack_features.{i}' for i in range(3)]
 
         # Create output names
@@ -418,7 +430,7 @@ def export_model_to_onnx(model: nn.Module, dummy_inputs: Dict[str, Any],
         if use_prompt_tuning:
             dynamic_axes["image_embeds"] = {0: "image_token_len"}
 
-        if model_config.model_type == "qwen3_vl_text":
+        if model_config.model_type in ["qwen3_vl_text", "qwen3_vl_moe_text"]:
             dynamic_axes.update({
                 f"deepstack_features.{i}": {
                     0: "image_token_len"
@@ -501,6 +513,7 @@ def export_llm_model(model_dir: str,
         vocab_map=vocab_map)
 
     model = replace_torch_quant_linear_with_int4_plugin(model)
+    model = replace_torch_moe_module_with_moe_fp16_plugin(model, model_dir)
 
     # Create dummy inputs
     dummy_inputs = create_dummy_inputs(model,

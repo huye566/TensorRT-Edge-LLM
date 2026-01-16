@@ -313,11 +313,6 @@ bool LLMInferenceRuntime::handleRequest(
         // Save KVCache if requested
         if (request.saveSystemPromptKVCache)
         {
-            if (mMultimodalRunner)
-            {
-                mMultimodalRunner->preprocessSystemPrompt(
-                    batchSystemPrompts[i], mTokenizer.get(), mLLMEngineRunner->getRopeCosSinCacheTensor(), stream);
-            }
             bool const saveCacheStatus = genAndSaveSystemPromptKVCache(batchSystemPrompts[i], loraWeightsName, stream);
             if (!saveCacheStatus)
             {
@@ -582,6 +577,12 @@ bool LLMInferenceRuntime::genAndSaveSystemPromptKVCache(
             "Engine.",
             promptIdsLength, mEngineConfig.maxSupportedInputLength);
         return false;
+    }
+
+    if (mMultimodalRunner)
+    {
+        mMultimodalRunner->preprocessSystemPrompt(
+            prompt, mTokenizer.get(), mLLMEngineRunner->getRopeCosSinCacheTensor(), stream);
     }
 
     std::vector<std::vector<int32_t>> batchedInputIds(activeBatchSize, tokenizedPrompt);

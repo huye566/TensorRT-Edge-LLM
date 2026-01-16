@@ -330,6 +330,37 @@ double toGB(size_t bytes)
     return static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
 }
 
+bool tensorContentEqualCPU(Tensor const& lhs, Tensor const& rhs)
+{
+    if (lhs.getShape() != rhs.getShape())
+    {
+        return false;
+    }
+
+    if (lhs.getDataType() != rhs.getDataType())
+    {
+        return false;
+    }
+
+    if (lhs.getDeviceType() != rhs.getDeviceType())
+    {
+        return false;
+    }
+
+    if (lhs.getDeviceType() != DeviceType::kCPU)
+    {
+        return false;
+    }
+
+    if (lhs.isEmpty() && rhs.isEmpty())
+    {
+        return true;
+    }
+
+    size_t const data_size = lhs.getShape().volume() * utils::getTypeSize(lhs.getDataType());
+    return std::memcmp(lhs.rawPointer(), rhs.rawPointer(), data_size) == 0;
+}
+
 } // namespace utils
 } // namespace rt
 } // namespace trt_edgellm

@@ -40,6 +40,7 @@ QwenViTRunner::QwenViTRunner(
     : MultimodalRunner(engineDir, stream)
     , mLLMMaxBatchSize(llmMaxBatchSize)
     , mLLMMaxSequenceLength(llmMaxSequenceLength)
+    , mBatchedInputIdsCached(false)
 {
     if (!validateAndFillConfig(engineDir))
     {
@@ -273,6 +274,8 @@ bool QwenViTRunner::allocateBuffer(cudaStream_t stream)
         "QwenViTRunner::mCuSeqlensDevice");
     mCuSeqlensHost = rt::Tensor(
         {mConfig.maxNumImages + 1}, rt::DeviceType::kCPU, nvinfer1::DataType::kINT64, "QwenViTRunner::mCuSeqlensHost");
+    mLastCuSeqlensHost = rt::Tensor({mConfig.maxNumImages + 1}, rt::DeviceType::kCPU, nvinfer1::DataType::kINT64,
+        "QwenViTRunner::mLastCuSeqlensHost");
 
     return true;
 }
@@ -313,8 +316,16 @@ void QwenViTRunner::formatPatch(rt::imageUtils::ImageData const& image,
     auto imageSize = height * width * channels;
     for (int64_t i = 0; i < mConfig.temporalPatchSize; ++i)
     {
-        CUDA_CHECK(cudaMemcpyAsync(mImageDevice.rawPointer() + i * imageSize * sizeof(unsigned char), imageData,
-            imageSize * sizeof(unsigned char), cudaMemcpyHostToDevice, stream));
+        if (image.buffer->getDeviceType() == rt::DeviceType::kCPU)
+        {
+            CUDA_CHECK(cudaMemcpyAsync(mImageDevice.rawPointer() + i * imageSize * sizeof(unsigned char), imageData,
+                imageSize * sizeof(unsigned char), cudaMemcpyHostToDevice, stream));
+        }
+        else
+        {
+            CUDA_CHECK(cudaMemcpyAsync(mImageDevice.rawPointer() + i * imageSize * sizeof(unsigned char), imageData,
+                imageSize * sizeof(unsigned char), cudaMemcpyDeviceToDevice, stream));
+        }
     }
 
     // Normalize image
@@ -373,7 +384,7 @@ std::tuple<int64_t, int64_t> QwenViTRunner::getResizedImageSize(
 
 void QwenViTRunner::imagePreprocess(rt::LLMGenerationRequest const& request,
     std::vector<std::vector<int64_t>>& imageGridTHWs, std::vector<int64_t>& imageTokenLengths,
-    std::vector<int64_t>& numImages, bool doResize, cudaStream_t stream)
+    std::vector<int64_t>& numImages, cudaStream_t stream)
 {
     // Use pre-allocated pinned host tensor for cumulative sequence lengths
     int64_t* cuSeqlensData = mCuSeqlensHost.dataPointer<int64_t>();
@@ -385,9 +396,13 @@ void QwenViTRunner::imagePreprocess(rt::LLMGenerationRequest const& request,
         int64_t numImage = 0;
         for (auto const& image : req.imageBuffers)
         {
-            if (doResize)
+            auto [resizedHeight, resizedWidth] = getResizedImageSize(image.height, image.width);
+            if (resizedHeight != image.height || resizedWidth != image.width)
             {
-                auto [resizedHeight, resizedWidth] = getResizedImageSize(image.height, image.width);
+                if (image.buffer->getDeviceType() == rt::DeviceType::kGPU)
+                {
+                    throw std::runtime_error("Can not do image resize with gpu data type.");
+                }
                 rt::imageUtils::resizeImage(image, mResizedImageHost, resizedWidth, resizedHeight);
                 formatPatch(mResizedImageHost, imageGridTHWs, imageTokenLengths, cuSeqlensData, cuSeqlensSize, stream);
             }
@@ -416,24 +431,52 @@ void QwenViTRunner::imagePreprocess(rt::LLMGenerationRequest const& request,
     // Reshape tensors
     int64_t totalImageTokens = totalSeqLength / (mConfig.mergeSize * mConfig.mergeSize);
     mVitInput.reshape({totalSeqLength, mConfig.inputDim});
-    mAttentionMask.reshape({1, totalSeqLength, totalSeqLength});
-    mRotaryPosEmb.reshape({totalSeqLength, mConfig.vitPosEmbDim});
     mOutputEmbedding.reshape({totalImageTokens, mConfig.outHiddenSize});
-
     // Record performance data
     int64_t imageCount = std::accumulate(numImages.begin(), numImages.end(), int64_t(0));
     mMultimodalMetrics.recordRun(imageCount, totalImageTokens);
 
-    // Compute attention mask
-    CUDA_CHECK(cudaMemcpyAsync(mCuSeqlensDevice.rawPointer(), mCuSeqlensHost.rawPointer(),
-        cuSeqlensSize * sizeof(int64_t), cudaMemcpyHostToDevice, stream));
-    kernel::initAttentionMaskQwenViT(mCuSeqlensDevice, mAttentionMask, stream);
+    /*
+     * Cache-based optimization for ViT attention mask and rotary position embeddings.
+     *
+     * To improve inference speed, avoid recomputing tensors that remain unchanged between consecutive runs.
+     *
+     * 1. Attention Mask:
+     *    - If the current cumulative sequence lengths (`mCuSeqlensHost`) differ from the last inference
+     * (`mLastCuSeqlensHost`), recompute the attention mask.
+     *    - Otherwise, reuse the previously computed `mAttentionMask`.
+     *    - Steps include reshaping the mask, copying sequence lengths to device, and initializing the mask via kernel.
+     *    - After computation, `mCuSeqlensHost` is cached into `mLastCuSeqlensHost` for future comparisons.
+     *
+     * 2. Rotary Position Embeddings:
+     *    - Recomputed only if either:
+     *        a) `mCuSeqlensHost` has changed, or
+     *        b) the current image grid sizes (`imageGridTHWs`) differ from the last inference (`mLastImageGridTHWs`).
+     *    - If neither changed, the cached `mRotaryPosEmb` from the previous inference is reused.
+     *    - Steps include reshaping the embeddings and calling `initRotaryPosEmbQwenViT` for each image grid.
+     *
+     * This conditional caching ensures that expensive tensor computations are only performed when necessary,
+     * leveraging cached results whenever input shapes and sequence lengths remain constant between inferences.
+     */
 
-    // Compute rotary position embeddings
-    for (int64_t i = 0; i < imageGridTHWs.size(); ++i)
+    if (!rt::utils::tensorContentEqualCPU(mCuSeqlensHost, mLastCuSeqlensHost))
     {
-        kernel::initRotaryPosEmbQwenViT(
-            mRotaryPosEmb, imageGridTHWs[i], mConfig.mergeSize, cuSeqlensData[i], 10000.0f, 1.0f, stream);
+        mAttentionMask.reshape({1, totalSeqLength, totalSeqLength});
+        // Compute attention mask
+        CUDA_CHECK(cudaMemcpyAsync(mCuSeqlensDevice.rawPointer(), mCuSeqlensHost.rawPointer(),
+            cuSeqlensSize * sizeof(int64_t), cudaMemcpyHostToDevice, stream));
+        kernel::initAttentionMaskQwenViT(mCuSeqlensDevice, mAttentionMask, stream);
+        mCuSeqlensHost.deepCopyTo(mLastCuSeqlensHost);
+    }
+    if (!rt::utils::tensorContentEqualCPU(mCuSeqlensHost, mLastCuSeqlensHost) || imageGridTHWs != mLastImageGridTHWs)
+    {
+        mRotaryPosEmb.reshape({totalSeqLength, mConfig.vitPosEmbDim});
+        // Compute rotary position embeddings
+        for (int64_t i = 0; i < imageGridTHWs.size(); ++i)
+        {
+            kernel::initRotaryPosEmbQwenViT(
+                mRotaryPosEmb, imageGridTHWs[i], mConfig.mergeSize, cuSeqlensData[i], 10000.0f, 1.0f, stream);
+        }
     }
 
     // Compute additional inputs
@@ -695,9 +738,24 @@ bool QwenViTRunner::preprocess(rt::LLMGenerationRequest const& request,
 
     try
     {
-        imagePreprocess(request, imageGridTHWs, imageTokenLengths, numImages, true, stream);
-        textPreprocess(request, batchedInputIds, numImages, imageTokenLengths, tokenizer);
-        generateMropeParams(batchedInputIds, imageGridTHWs, ropeRotaryCosSinDevice, stream);
+        imagePreprocess(request, imageGridTHWs, imageTokenLengths, numImages, stream);
+        if (request.staticPrompt && imageGridTHWs == mLastImageGridTHWs && mBatchedInputIdsCached)
+        {
+            batchedInputIds = mBatchedInputIds;
+        }
+        else
+        {
+            textPreprocess(request, batchedInputIds, numImages, imageTokenLengths, tokenizer);
+            generateMropeParams(batchedInputIds, imageGridTHWs, ropeRotaryCosSinDevice, stream);
+            if (request.staticPrompt)
+            {
+                mBatchedInputIds = batchedInputIds;
+                mBatchedInputIdsCached = true;
+            }
+        }
+        // At the end of preprocess, update `mLastImageGridTHWs` to the current `imageGridTHWs` for the next inference
+        // comparison.
+        mLastImageGridTHWs = imageGridTHWs;
     }
     catch (std::exception const& e)
     {

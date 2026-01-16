@@ -194,7 +194,8 @@ void appendStageTimingData(std::ostream& summary, std::string const& stageName, 
     {
         summary << displayName << " - Total Runs: " << timingData->getTotalRuns() << ", Total GPU Time: " << std::fixed
                 << std::setprecision(2) << timingData->getTotalGpuTimeMs()
-                << " ms, Average: " << timingData->getAverageTimeMs() << " ms" << std::endl;
+                << " ms, Average: " << timingData->getAverageTimeMs()
+                << " ms, Latest: " << timingData->getLatestTimeMs() << std::endl;
     }
 }
 

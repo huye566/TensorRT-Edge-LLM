@@ -150,6 +150,22 @@ def is_incompatible_chat_template_model(model_dir: str) -> Tuple[bool, str]:
     return False, ""
 
 
+def _get_model_type(dir_path: str) -> Optional[str]:
+    try:
+        cfg = AutoConfig.from_pretrained(dir_path, trust_remote_code=True)
+    except Exception:
+        return None
+    return getattr(cfg, "model_type", None)
+
+
+def _get_model_architectures(dir_path: str) -> Optional[str]:
+    try:
+        cfg = AutoConfig.from_pretrained(dir_path, trust_remote_code=True)
+    except Exception:
+        return None
+    return getattr(cfg, "architectures", [None])[0]
+
+
 def _load_phi4mm_war(model_dir: str):
     """
     Dynamically import local modeling_phi4mm.py as a synthetic package so that
@@ -273,6 +289,7 @@ def load_hf_model(
 
     # Due to a known loading issue with Phi4MM on recent transformers, special handling is required.
     # See: https://huggingface.co/microsoft/Phi-4-multimodal-instruct/discussions/75.
+    print(f"Model architecture: {_get_model_architectures(model_dir)}")
     if _is_phi4mm_model(model_dir):
         module = _load_phi4mm_war(model_dir)
         model = module.Phi4MMForCausalLM.from_pretrained(
@@ -280,12 +297,20 @@ def load_hf_model(
             torch_dtype=torch_dtype,
             trust_remote_code=True,
             _attn_implementation="eager").to(device)
+    elif _get_model_architectures(model_dir) == "SDQwen3VLMoeForConditionalGeneration":
+        from ..sd_models.sd_modeling_qwen3_vl_moe import SDQwen3VLMoeForConditionalGeneration
+        model = SDQwen3VLMoeForConditionalGeneration.from_pretrained(
+            model_dir,
+            dtype=torch_dtype,
+            trust_remote_code=True,
+            _attn_implementation="eager").to(device)
+        print("Loading SDQwen3VLMoeForConditionalGeneration model...")
     else:
         # Try loading as AutoModelForCausalLM first
         try:
             model = AutoModelForCausalLM.from_pretrained(
                 model_dir,
-                torch_dtype=torch_dtype,
+                dtype=torch_dtype,
                 trust_remote_code=True,
                 _attn_implementation="eager").to(device)
         except Exception:
@@ -294,7 +319,7 @@ def load_hf_model(
                 # TODO: Need a WAR to quantize only the language model.
                 # In VLMs, the model has both model.language_model and model.vision_model.
                 model = AutoModelForImageTextToText.from_pretrained(
-                    model_dir, torch_dtype=torch_dtype,
+                    model_dir, dtype=torch_dtype,
                     trust_remote_code=True).to(device)
             except Exception as e:
                 raise ValueError(

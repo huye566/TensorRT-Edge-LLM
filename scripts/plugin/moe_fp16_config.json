@@ -1,0 +1,125 @@
+{
+  "plugin_name": "MoEFp16Plugin",
+  "namespace": "trt_edgellm::plugins",
+  "kernel_namespace": "trt_edgellm::kernel",
+  "description": "TensorRT plugin for Mixture of Experts (MoE) layer in FP16",
+  "version": "1",
+  "supports_dynamic": true,
+  "workspace_needed": true,
+  
+  "inputs": [
+    {
+      "name": "hidden_state",
+      "dtype": "half",
+      "dims": [-1, -1, -1],
+      "description": "Input hidden state [batch_size, seq_len, hidden_size]"
+    },
+    {
+      "name": "router_weight",
+      "dtype": "half",
+      "dims": [-1, -1],
+      "description": "Router weight matrix [hidden_size, experts_num]"
+    },
+    {
+      "name": "router_bias",
+      "dtype": "half",
+      "dims": [-1],
+      "description": "Router bias vector [experts_num]"
+    },
+    {
+      "name": "gate_proj_weight",
+      "dtype": "half",
+      "dims": [-1, -1, -1],
+      "description": "Gate projection weights [experts_num, hidden_size, intermediate_size]"
+    },
+    {
+      "name": "up_proj_weight",
+      "dtype": "half",
+      "dims": [-1, -1, -1],
+      "description": "Up projection weights [experts_num, hidden_size, intermediate_size]"
+    },
+    {
+      "name": "down_proj_weight",
+      "dtype": "half",
+      "dims": [-1, -1, -1],
+      "description": "Down projection weights [experts_num, intermediate_size, hidden_size]"
+    }
+  ],
+  
+  "outputs": [
+    {
+      "name": "moe_out",
+      "dtype": "half",
+      "dims": [-1, -1, -1],
+      "description": "Output tensor [batch_size, seq_len, hidden_size]"
+    }
+  ],
+  
+  "attributes": [
+    {
+      "name": "experts_num",
+      "type": "int32",
+      "description": "Number of experts"
+    },
+    {
+      "name": "experts_topk",
+      "type": "int32",
+      "description": "Top-k experts per token"
+    }
+  ],
+  
+  "serialize_members": [
+    {
+      "name": "hidden_size",
+      "type": "int32",
+      "description": "Hidden dimension size (inferred from input)"
+    },
+    {
+      "name": "intermediate_size",
+      "type": "int32",
+      "description": "Intermediate dimension size (inferred from input)"
+    }
+  ],
+  
+  "kernels": [
+    {
+      "name": "context_moe_fp16_forward",
+      "description": "Context mode MoE forward for seq_len > 1",
+      "parameters": [
+        {"name": "hiddenState", "type": "half", "is_pointer": true},
+        {"name": "routerWeight", "type": "half", "is_pointer": true},
+        {"name": "routerBias", "type": "half", "is_pointer": true},
+        {"name": "gateProjWeight", "type": "half", "is_pointer": true},
+        {"name": "upProjWeight", "type": "half", "is_pointer": true},
+        {"name": "downProjWeight", "type": "half", "is_pointer": true},
+        {"name": "output", "type": "half", "is_pointer": true},
+        {"name": "workspace", "type": "void", "is_pointer": true},
+        {"name": "batch_size", "type": "int32"},
+        {"name": "seq_len", "type": "int32"},
+        {"name": "hidden_size", "type": "int32"},
+        {"name": "intermediate_size", "type": "int32"},
+        {"name": "experts_num", "type": "int32"},
+        {"name": "experts_topk", "type": "int32"}
+      ]
+    },
+    {
+      "name": "decode_moe_fp16_forward",
+      "description": "Decode mode MoE forward for seq_len = 1",
+      "parameters": [
+        {"name": "hiddenState", "type": "half", "is_pointer": true},
+        {"name": "routerWeight", "type": "half", "is_pointer": true},
+        {"name": "routerBias", "type": "half", "is_pointer": true},
+        {"name": "gateProjWeight", "type": "half", "is_pointer": true},
+        {"name": "upProjWeight", "type": "half", "is_pointer": true},
+        {"name": "downProjWeight", "type": "half", "is_pointer": true},
+        {"name": "output", "type": "half", "is_pointer": true},
+        {"name": "workspace", "type": "void", "is_pointer": true},
+        {"name": "batch_size", "type": "int32"},
+        {"name": "hidden_size", "type": "int32"},
+        {"name": "intermediate_size", "type": "int32"},
+        {"name": "experts_num", "type": "int32"},
+        {"name": "experts_topk", "type": "int32"}
+      ]
+    }
+  ]
+}

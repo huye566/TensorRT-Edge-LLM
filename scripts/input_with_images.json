@@ -1,0 +1,72 @@
+{
+    "batch_size": 1,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "top_k": 1,
+    "max_generate_length": 1024,
+    "requests": [
+        {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": "/workspace/app/datasets/text_recog.jpg"
+                        },
+                        {
+                            "type": "text",
+                            "text": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": "/workspace/app/datasets/text_recog.jpg"
+                        },
+                        {
+                            "type": "text",
+                            "text": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": "/workspace/app/datasets/text_recog.jpg"
+                        },
+                        {
+                            "type": "text",
+                            "text": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

@@ -107,6 +107,17 @@ public:
         std::copy(dims.d, dims.d + mNumDims, mDims.begin());
     }
 
+    //! @brief Equality comparison operator
+    //! @param other Coords object to compare with
+    //! @return True if both Coords have the same number of dimensions
+    //!         and all corresponding dimension values are equal, false otherwise
+    bool operator==(Coords const& other) const noexcept;
+
+    //! @brief Inequality comparison operator
+    //! @param other Coords object to compare with
+    //! @return True if the Coords are not equal (i.e., operator== returns false), false otherwise
+    bool operator!=(Coords const& other) const noexcept;
+
     /*!
      * @brief Construct from iterator range
      * @tparam IT Iterator type
@@ -346,6 +357,19 @@ public:
     }
 
     /*!
+     * @brief Deep copy the contents of this tensor to another tensor
+     *
+     * Copies the tensor data to the destination tensor `dst`. If the shapes differ,
+     * the destination tensor will be reshaped if it owns its memory and has sufficient
+     * capacity; otherwise, the copy will fail. Uses `memcpy` for CPU and `cudaMemcpy` for GPU.
+     *
+     * @param dst Destination tensor to copy data into
+     * @return True if the copy succeeded, false otherwise (e.g., data type mismatch,
+     *         insufficient capacity, or destination does not own memory)
+     */
+    bool deepCopyTo(Tensor& dst) const noexcept;
+
+    /*!
      * @brief Reshape the tensor
      *
      * Explicitly disallows reshape when the memory is not owned by the tensor
@@ -404,6 +428,19 @@ double toMB(size_t bytes);
 //! @param bytes Size in bytes
 //! @return Size in gigabytes
 double toGB(size_t bytes);
+
+/*!
+ * @brief Compare the contents of two CPU tensors for equality
+ *
+ * Checks whether tensors `lhs` and `rhs` have the same shape, data type, and device,
+ * and whether their data contents are identical. Only supports CPU tensors.
+ * Empty tensors are considered equal.
+ *
+ * @param lhs First tensor to compare
+ * @param rhs Second tensor to compare
+ * @return True if the tensors have identical contents, false otherwise
+ */
+bool tensorContentEqualCPU(Tensor const& lhs, Tensor const& rhs);
 } // namespace utils
 
 //! @brief Optional input tensor type wrapper

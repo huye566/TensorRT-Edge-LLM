@@ -86,6 +86,8 @@ struct LLMGenerationRequest
     //!< applyChatTemplate=true
     bool enableThinking{false};
     //!< Whether to enable thinking mode for models that support it. Default is disabled
+    bool staticPrompt{true};
+    //!< Input prompt is fixed
 };
 
 /*! \brief LLM Generation Response structure

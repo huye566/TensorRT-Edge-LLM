@@ -84,6 +84,21 @@ std::array<int64_t, kMAX_DIMS> computeStrides(Coords const& shape)
 }
 } // namespace utils
 
+bool Coords::operator==(Coords const& other) const noexcept
+{
+    if (mNumDims != other.mNumDims)
+    {
+        return false;
+    }
+
+    return std::equal(mDims.begin(), mDims.begin() + mNumDims, other.mDims.begin());
+}
+
+bool Coords::operator!=(Coords const& other) const noexcept
+{
+    return !(*this == other);
+}
+
 int64_t Coords::volume() const
 {
     if (mNumDims == 0)
@@ -299,6 +314,46 @@ void* Tensor::rawPointer() noexcept
 void const* Tensor::rawPointer() const noexcept
 {
     return data;
+}
+
+bool Tensor::deepCopyTo(Tensor& dst) const noexcept
+{
+    if (mDataType != dst.mDataType)
+    {
+        return false;
+    }
+
+    if (mShape != dst.mShape)
+    {
+        if (!dst.getOwnMemory() || !dst.reshape(mShape))
+        {
+            return false;
+        }
+    }
+
+    size_t const data_size = mShape.volume() * utils::getTypeSize(mDataType);
+
+    DeviceType const srcDev = mDeviceType;
+    DeviceType const dstDev = dst.mDeviceType;
+
+    if (srcDev == DeviceType::kCPU && dstDev == DeviceType::kCPU)
+    {
+        std::memcpy(dst.rawPointer(), rawPointer(), data_size);
+    }
+    else if (srcDev == DeviceType::kGPU && dstDev == DeviceType::kGPU)
+    {
+        CUDA_CHECK(cudaMemcpy(dst.rawPointer(), rawPointer(), data_size, cudaMemcpyDeviceToDevice));
+    }
+    else if (srcDev == DeviceType::kGPU && dstDev == DeviceType::kCPU)
+    {
+        CUDA_CHECK(cudaMemcpy(dst.rawPointer(), rawPointer(), data_size, cudaMemcpyDeviceToHost));
+    }
+    else
+    {
+        CUDA_CHECK(cudaMemcpy(dst.rawPointer(), rawPointer(), data_size, cudaMemcpyHostToDevice));
+    }
+
+    return true;
 }
 
 bool Tensor::reshape(Coords shape) noexcept

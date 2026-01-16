@@ -38,6 +38,8 @@ from tensorrt_edgellm.visual_models.qwen2_vl_model import (
     Qwen2VisionTransformerPretrainedModelPatch, export_qwen2_vl_visual)
 from tensorrt_edgellm.visual_models.qwen3_vl_model import (
     Qwen3VLVisionModelPatch, export_qwen3_vl_visual)
+from tensorrt_edgellm.visual_models.qwen3_vl_moe_model import (
+    Qwen3VLMoeVisionModelPatch, export_qwen3_vl_moe_visual)
 
 from ..llm_models.model_utils import load_hf_model
 from .config_export import export_vision_config
@@ -98,7 +100,7 @@ def visual_export(model_dir: str,
         # Create Qwen2-VL wrapper model
         wrapped_model = Qwen2VisionTransformerPretrainedModelPatch._from_config(
             model.visual.config,
-            torch_dtype=torch_dtype,
+            dtype=torch_dtype,
         )
         wrapped_model.load_state_dict(model.visual.state_dict())
         wrapped_model.eval().to(device)
@@ -116,7 +118,7 @@ def visual_export(model_dir: str,
         # Create Qwen2.5-VL wrapper model
         wrapped_model = Qwen2_5_VisionTransformerPretrainedModelPatch._from_config(
             model.visual.config,
-            torch_dtype=torch_dtype,
+            dtype=torch_dtype,
         )
         wrapped_model.load_state_dict(model.visual.state_dict())
         wrapped_model.eval().to(device)
@@ -133,7 +135,7 @@ def visual_export(model_dir: str,
         # Create Qwen3-VL wrapper model
         wrapped_model = Qwen3VLVisionModelPatch._from_config(
             model.visual.config,
-            torch_dtype=torch_dtype,
+            dtype=torch_dtype,
         )
         wrapped_model.load_state_dict(model.visual.state_dict())
         wrapped_model.eval().to(device)
@@ -144,6 +146,22 @@ def visual_export(model_dir: str,
 
         # Export using the wrapper's export function
         export_qwen3_vl_visual(wrapped_model, output_dir, torch_dtype)
+
+    elif model_type == 'qwen3_vl_moe':
+        print(f"Exporting Qwen3-VL moe visual model from {model_dir}")
+        wrapped_model = Qwen3VLMoeVisionModelPatch._from_config(
+            model.visual.config,
+            dtype=torch_dtype,
+        )
+        wrapped_model.load_state_dict(model.visual.state_dict())
+        wrapped_model.eval().to(device)
+        # Apply quantization to wrapped model if requested
+        if quantization == "fp8":
+            wrapped_model = quantize_visual(wrapped_model, quantization,
+                                            processor, dataset_dir)
+
+        # Export using the wrapper's export function
+        export_qwen3_vl_moe_visual(wrapped_model, output_dir, torch_dtype)
 
     elif model_type == 'internvl':
         print(f"Exporting InternVL3 visual model from {model_dir}")

@@ -1,0 +1,2 @@
+add_subdirectory(moe_kernels)
+add_subdirectory(moe_kernels_cutlass)
