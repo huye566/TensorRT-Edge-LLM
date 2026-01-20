@@ -36,11 +36,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-export HOME_DIR="$(dirname "$(dirname $(readlink -f $0))")"
+export HOME_DIR="$(dirname "$(dirname "$(dirname $(readlink -f $0))")")"
 echo "HOME_DIR: ${HOME_DIR}"
 cd ${HOME_DIR}
 
-. ./scripts/common_config.sh
+. ./scripts/thor/common_config.sh
 
 EXEC_COMMAND="./build/tests_cpp/plugins/moe_plugins/test_moe_plugins"
 

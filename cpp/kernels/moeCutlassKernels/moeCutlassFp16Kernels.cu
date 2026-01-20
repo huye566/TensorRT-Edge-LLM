@@ -7,24 +7,10 @@
 #include <cuda_fp16.h>
 #include <assert.h>
 
-#include "cutlass/cutlass.h"
-#include "cutlass/gemm/device/gemm.h"
-#include "cutlass/gemm/device/gemm_universal.h"
-#include "cutlass/gemm/kernel/gemm_grouped.h"
-#include "cutlass/gemm/kernel/default_gemm_grouped.h"
-#include "cutlass/gemm/device/gemm_grouped.h"
-#include "cutlass/epilogue/thread/linear_combination_relu.h"
-#include "cutlass/epilogue/thread/linear_combination_silu.h"
-#include "cutlass/util/host_tensor.h"
-#include "cutlass/util/reference/device/gemm.h"
-#include "cutlass/util/reference/host/tensor_compare.h"
-#include "cutlass/util/reference/host/tensor_copy.h"
-#include "cutlass/util/reference/host/tensor_fill.h"
-#include "cutlass/util/tensor_view_io.h"
-
 #include "helper.h"
 #include "kernels/common/cublas_wrapper.h"
 #include "kernels/common/cutlass_wrapper.h"
+#include "kernels/common/cutlass_wrapper_blackwell.h"
 
 #ifdef ENABLE_MOE_DEBUG
     #define MOE_PRINT(fmt, ...) printf(fmt, ##__VA_ARGS__)
@@ -230,12 +216,12 @@ void forward_mlp_grouped(cutlass::half_t* output,
 
   cutlass_gemm_grouped<128, 128, 32, 64, 64, 32, false>(up_output, input, up_weight, problem_sizes_gate_up, stream);
  
-  elementwise_multiply( gate_mul_up_output, 
-                        gate_silu_output, 
-                        up_output, 
-                        num_tokens, 
-                        intermediate_size, 
-                        stream);
+  elementwise_multiply(gate_mul_up_output,
+                       gate_silu_output,
+                       up_output,
+                       num_tokens,
+                       intermediate_size,
+                       stream);
 
   cutlass_gemm_grouped<128, 128, 32, 64, 64, 32, false>(output, gate_mul_up_output, down_weight, problem_sizes_down, stream);
 }
@@ -294,6 +280,65 @@ void forward_mlp(cutlass::half_t* output,
         hidden_size,
         intermediate_size,
         stream);
+}
+
+void forward_mlp_blackwell(cutlass::half_t* output,
+                            const cutlass::half_t* input,
+                            const cutlass::half_t* gate_weight,
+                            const cutlass::half_t* up_weight,
+                            const cutlass::half_t* down_weight,
+                            cutlass::half_t* gate_silu_output,
+                            cutlass::half_t* up_output,
+                            cutlass::half_t* gate_mul_up_output,
+                            int batch_size,
+                            int seq_len,
+                            int hidden_size,
+                            int intermediate_size,
+                            cudaStream_t stream) {
+    if (!input || !gate_weight || !up_weight || !down_weight || !output 
+        || !gate_silu_output || !up_output || !gate_mul_up_output) {
+        return;
+    }
+
+    int num_tokens = batch_size * seq_len;
+
+    cutlass_gemm_blackwell<true,false>(
+        gate_silu_output,
+        input,
+        gate_weight,
+        nullptr,
+        num_tokens,
+        intermediate_size,
+        hidden_size,
+        stream);
+
+    cutlass_gemm_blackwell<false,false>(
+        reinterpret_cast<cutlass::half_t*>(up_output),
+        reinterpret_cast<const cutlass::half_t*>(input),
+        reinterpret_cast<const cutlass::half_t*>(up_weight),
+        nullptr,
+        num_tokens,
+        intermediate_size,
+        hidden_size,
+        stream);
+
+    elementwise_multiply(
+        gate_mul_up_output,
+        gate_silu_output,
+        up_output,
+        num_tokens,
+        intermediate_size,
+        stream);
+
+    cutlass_gemm_blackwell<false,false>(
+        reinterpret_cast<cutlass::half_t*>(output),
+        reinterpret_cast<const cutlass::half_t*>(gate_mul_up_output),
+        reinterpret_cast<const cutlass::half_t*>(down_weight),
+        nullptr,
+        num_tokens,
+        hidden_size,
+        intermediate_size,
+        stream);         
 }
 
 void prefill_compute_router_logits_cutlass_v1(const MoeInputsParams& params) {
@@ -401,6 +446,31 @@ void prefill_compute_router_logits_cutlass(const MoeInputsParams& params) {
       params.expert_indices,
       num_tokens, num_experts_padded, num_experts);
   CUDA_CHECK(cudaGetLastError());
+}
+
+void prefill_compute_router_logits_cutlass_blackwell(const MoeInputsParams& params) {
+  int num_tokens = params.total_tokens();
+  int num_experts = params.experts_num;
+  int num_experts_padded = 8;
+  const cutlass::half_t* input_router =  reinterpret_cast<cutlass::half_t*>(params.hidden_state);
+
+  cutlass_gemm_blackwell<false,true>(reinterpret_cast<cutlass::half_t*>(params.router_logits),
+            input_router,
+            reinterpret_cast<const cutlass::half_t*>(params.router_weights_padded),
+            reinterpret_cast<const cutlass::half_t*>(params.router_bias_padded),
+            num_tokens,
+            num_experts_padded,
+            params.hidden_size,
+            params.stream);
+  CUDA_CHECK(cudaGetLastError());
+
+  dim3 block_router(256);
+  dim3 grid_router((num_tokens + block_router.x - 1) / block_router.x);
+  find_row_max_kernel<<<grid_router, block_router, 0, params.stream>>>(
+      reinterpret_cast<const cutlass::half_t*>(params.router_logits),
+      params.expert_indices,
+      num_tokens, num_experts_padded, num_experts);
+  CUDA_CHECK(cudaGetLastError()); 
 }
 
 void prefill_compute_router_logits_cublas(const MoeInputsParams& params) {
@@ -588,7 +658,11 @@ void forward_moe(const MoeInputsParams& params) {
     int32_t *d_expert_offset = params.expert_offsets;
     int32_t *d_token2pos = params.token_to_buffer_map;
 
+#ifdef SM_101
+    prefill_compute_router_logits_cutlass_blackwell(params);
+#else    
     prefill_compute_router_logits_cutlass(params);
+#endif
 
     cudaMemsetAsync(d_expert_count, 0, num_experts * sizeof(int32_t), params.stream);
     kernel_count_tokens<<<(num_tokens + 255) / 256, 256, 0, params.stream>>>(params.expert_indices, d_expert_count, num_tokens);
@@ -626,6 +700,21 @@ void forward_moe(const MoeInputsParams& params) {
       const cutlass::half_t *mlp_up_weight = up_proj_weight + e * hidden_size * intermediate_size;
       const cutlass::half_t *mlp_down_weight = down_proj_weight + e * intermediate_size * hidden_size;
 
+#ifdef SM_101
+      forward_mlp_blackwell(mlp_output,
+                            mlp_input,
+                            mlp_gate_weight,
+                            mlp_up_weight,
+                            mlp_down_weight,
+                            silu_output,
+                            up_output,
+                            hadamard_output,
+                            params.batch_size,
+                            tokens_this_e,
+                            params.hidden_size,
+                            params.intermediate_size,
+                            params.stream); 
+#else        
       forward_mlp(mlp_output,
                 mlp_input,
                 mlp_gate_weight,
@@ -639,6 +728,7 @@ void forward_moe(const MoeInputsParams& params) {
                 params.hidden_size,
                 params.intermediate_size,
                 params.stream); 
+#endif               
       CUDA_CHECK(cudaGetLastError());
     }
 

@@ -1,13 +1,14 @@
 #!/bin/bash
 
-MODEL_PATH=/root/.cache/huggingface/hub/Qwen3-VL-4B-MoE-Init
+MODEL_PATH=/opt/update/Qwen3-VL-4B-MoE-Init
 ONNX_DIR=${MODEL_PATH}/vlm_onnx
 ENGINE_DIR=${MODEL_PATH}/engines
 VIT_QUANT_TYPE=fp16
 LLM_QUANT_TYPE=fp16
-CMAKE_CUDA_ARCHITECTURES=101
+CMAKE_CUDA_ARCHITECTURES=101a
+TENSORRT_DIR=/opt/update/trt10.13_new
 
-# export LD_LIBRARY_PATH=/opt/update/trt10.13_new/usr/lib/aarch64-linux-gnu:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=${TENSORRT_DIR}/usr/lib/aarch64-linux-gnu:$LD_LIBRARY_PATH
 
 # 颜色定义
 RED='\033[0;31m'
@@ -26,6 +27,7 @@ printf "%-25s : ${YELLOW}%s${NC}\n" "ENGINE_DIR" "${ENGINE_DIR}"
 # printf "%-25s : ${YELLOW}%s${NC}\n" "CUDA_VERSION" "${CUDA_VERSION}"
 # printf "%-25s : ${YELLOW}%s${NC}\n" "TENSORRT_VERSION" "${TENSORRT_VERSION}"
 printf "%-25s : ${YELLOW}%s${NC}\n" "CMAKE_CUDA_ARCHITECTURES" "${CMAKE_CUDA_ARCHITECTURES}"
+printf "%-25s : ${YELLOW}%s${NC}\n" "TENSORRT_DIR" "${TENSORRT_DIR}"
 printf "%-25s : ${YELLOW}%s${NC}\n" "LD_LIBRARY_PATH" "${LD_LIBRARY_PATH}"
 printf "%-25s : ${YELLOW}%s${NC}\n" "VIT_QUANT_TYPE" "${VIT_QUANT_TYPE}"
 printf "%-25s : ${YELLOW}%s${NC}\n" "LLM_QUANT_TYPE" "${LLM_QUANT_TYPE}"

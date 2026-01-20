@@ -5,3 +5,7 @@ include_directories(
 add_subdirectory(cutlass_gemv)
 add_subdirectory(cutlass_gemm)
 add_subdirectory(cutlass_gemm_silu)
+add_subdirectory(cutlass_wrapper)
+if(SM_101)
+  add_subdirectory(cutlass_wrapper_blackwell)
+endif()

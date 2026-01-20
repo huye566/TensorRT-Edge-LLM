@@ -146,6 +146,7 @@ option(BUILD_UNIT_TESTS "Enable building unit tests" OFF)
 option(BUILD_KERNELS_TESTS "Enable building kernel tests" OFF)
 option(ENABLE_MOE_DEBUG "Enable MoE debug printing" OFF)
 option(USE_MOE_CUTLASS "Use MoE cutlass" OFF)
+option(SM_101 "Is Blackwell Architecture" OFF)
 
 if(ENABLE_MOE_DEBUG)
     add_definitions(-DENABLE_MOE_DEBUG)
@@ -161,6 +162,13 @@ else()
     message(STATUS "Not Use MoE cutlass")
 endif()
 
+# if(CMAKE_CUDA_ARCHITECTURES STREQUAL "101a" OR SM_101)
+if(SM_101)
+    add_definitions(-DSM_101)
+    message(STATUS "Is Blackwell Architectures")
+else()
+    message(STATUS "Is Not Blackwell Architecture")
+endif()
 
 # Build Core libraries of the project. attentionPlugin shared library and
 # edgellmCore/edgellmTokenizer/edgellmBuilder static library will be generated.

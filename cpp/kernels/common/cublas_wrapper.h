@@ -52,15 +52,17 @@ void cublas_gemm_silu(cublasHandle_t handle,
                      int m, int n, int k,
                      const T* A,
                      const T* B,
-                     T* C);
+                     T* C,
+                     MemoryFormat format = MemoryFormat::ROW_MAJOR);
 
 template<typename T>
 void cublas_gemm_bias(cublasHandle_t handle,
                      int m, int n, int k,
                      const T* A,
                      const T* B,
-                     const T* bias,  // bias向量，长度为n
-                     T* C);
+                     const T* bias,
+                     T* C,
+                     MemoryFormat format = MemoryFormat::ROW_MAJOR);
 
 } // namespace kernel
 } // namespace trt_edgellm

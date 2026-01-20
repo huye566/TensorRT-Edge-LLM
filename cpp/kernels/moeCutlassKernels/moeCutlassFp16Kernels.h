@@ -29,6 +29,20 @@ void forward_mlp(cutlass::half_t* output,
                   int intermediate_size,
                   cudaStream_t stream);
 
+void forward_mlp_blackwell(cutlass::half_t* output,
+                        const cutlass::half_t* input,
+                        const cutlass::half_t* gate_weight,
+                        const cutlass::half_t* up_weight,
+                        const cutlass::half_t* down_weight,
+                        cutlass::half_t* gate_output,
+                        cutlass::half_t* up_output,
+                        cutlass::half_t* gate_mul_up_output,
+                        int batch_size,
+                        int seq_len,
+                        int hidden_size,
+                        int intermediate_size,
+                        cudaStream_t stream);
+
 void forward_mlp_grouped(cutlass::half_t* output,
                   cutlass::half_t* input,
                   cutlass::half_t* gate_weight,

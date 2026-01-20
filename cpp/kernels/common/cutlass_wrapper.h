@@ -4,8 +4,10 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include <vector>
-#include "cutlass/cutlass.h"
-#include "cutlass/gemm/device/gemm.h"
+#include "cutlass/half.h"
+#include "cutlass/arch/arch.h"
+#include "cutlass/arch/mma.h"
+#include "cutlass/layout/layout.h"
 
 namespace trt_edgellm {
 namespace kernel {
@@ -63,7 +65,5 @@ void cutlass_gemm_grouped(ElementOutput* output,
 
 } // namespace kernel
 } // namespace trt_edgellm
-
-// #include "cutlass_wrapper_impl.h"
 
 #endif // CUTLASS_WRAPPER_H

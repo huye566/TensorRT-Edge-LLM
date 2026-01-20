@@ -29,6 +29,8 @@ do {                                                                          \
     #define PROFILE_END(name)
 #endif
 
+#define USE_CUDA_DEVICE_ID 0
+
 inline void print_device_info(int device_id = 0) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaSetDevice(device_id));

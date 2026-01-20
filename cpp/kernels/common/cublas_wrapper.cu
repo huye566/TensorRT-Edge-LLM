@@ -89,6 +89,8 @@ __global__ void silu_kernel<half>(half* data, int num_elements) {
     }
 }
 
+// https://docs.nvidia.com/cuda/cublas/index.html?highlight=cublasGemmEx#cublasgemmex
+// https://zhuanlan.zhihu.com/p/666391239
 template<>
 void cublas_gemm<half>(cublasHandle_t handle,
                       int m, int n, int k,
@@ -102,29 +104,46 @@ void cublas_gemm<half>(cublasHandle_t handle,
     half beta = 0.0f;
     cudaDataType_t data_type = CUDA_R_16F;
     cublasComputeType_t compute_type = CUBLAS_COMPUTE_16F;
+    // cublasComputeType_t compute_type = CUBLAS_COMPUTE_32F;
 
     // cuBLAS GEMM参数（列主序视角）
     // 实际计算：C_col = alpha * A_col * B_col + beta * C_col
-    int m_col = m;
-    int n_col = n;
-    int k_col = k;
-    int lda = m_col;
-    int ldb = k_col;
-    int ldc = m_col;
+    int m_col, n_col, k_col;
+    int lda, ldb, ldc;
     cublasOperation_t transA = CUBLAS_OP_N;
     cublasOperation_t transB = CUBLAS_OP_N;
     half * A_ptr = const_cast<half*>(A);
     half * B_ptr = const_cast<half*>(B);
 
-    if (format == MemoryFormat::ROW_MAJOR) {
+    if (format == MemoryFormat::ROW_MAJOR) { // out A * B = (B^T * A^T)^T
+        m_col = n;
+        n_col = m;
+        k_col = k;
+
+        lda = k;
+        ldb = n;
+        ldc = n;
+        status = cublasGemmEx(handle,
+                         transA,
+                         transB,
+                         m_col, n_col, k_col,
+                         &alpha,
+                         B_ptr, data_type, ldb,
+                         A_ptr, data_type, lda,
+                         &beta,
+                         C, data_type, ldc,
+                         compute_type,
+                         CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+    } else { // (A * B)^T, out col major
         transA = CUBLAS_OP_T;
         transB = CUBLAS_OP_T;
-        lda = k_col;
-        ldb = n_col;
-        ldc = m_col;
-    } 
-
-    status = cublasGemmEx(handle,
+        m_col = m;
+        n_col = n;
+        k_col = k;
+        lda = k; // A row
+        ldb = n; // B row
+        ldc = m;
+        status = cublasGemmEx(handle,
                          transA,
                          transB,
                          m_col, n_col, k_col,
@@ -134,8 +153,8 @@ void cublas_gemm<half>(cublasHandle_t handle,
                          &beta,
                          C, data_type, ldc,
                          compute_type,
-                         CUBLAS_GEMM_DEFAULT);
-    
+                         CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+    }
     CUBLAS_CHECK(status);
 }
 
@@ -152,34 +171,50 @@ void cublas_gemm<float>(cublasHandle_t handle,
     float beta = 0.0f;
 
     // cuBLAS GEMM参数（列主序视角）
-    int m_col = m;
-    int n_col = n;
-    int k_col = k;
-    int lda = m_col;
-    int ldb = k_col;
-    int ldc = m_col;
+    int m_col, n_col, k_col;
+    int lda, ldb, ldc;
     cublasOperation_t transA = CUBLAS_OP_N;
     cublasOperation_t transB = CUBLAS_OP_N;
     float * A_ptr = const_cast<float*>(A);
     float * B_ptr = const_cast<float*>(B);
 
     if (format == MemoryFormat::ROW_MAJOR) {
+        m_col = n;
+        n_col = m;
+        k_col = k;
+
+        lda = k;
+        ldb = n;
+        ldc = n;
+    
+        status = cublasSgemm(handle,
+                            transA,
+                            transB,
+                            m_col, n_col, k_col,
+                            &alpha,
+                            B_ptr, ldb,
+                            A_ptr, lda,
+                            &beta,
+                            C, ldc);
+    } else {
         transA = CUBLAS_OP_T;
         transB = CUBLAS_OP_T;
-        lda = k_col;
-        ldb = n_col;
-        ldc = m_col;
-    } 
-    
-    status = cublasSgemm(handle,
-                        transA,
-                        transB,
-                        m_col, n_col, k_col,
-                        &alpha,
-                        A_ptr, lda,
-                        B_ptr, ldb,
-                        &beta,
-                        C, ldc);
+        m_col = m;
+        n_col = n;
+        k_col = k;
+        lda = k;
+        ldb = n;
+        ldc = m;
+        status = cublasSgemm(handle,
+                            transA,
+                            transB,
+                            m_col, n_col, k_col,
+                            &alpha,
+                            A_ptr, lda,
+                            B_ptr, ldb,
+                            &beta,
+                            C, ldc);
+    }
     CUBLAS_CHECK(status);
 }
 
@@ -188,8 +223,9 @@ void cublas_gemm_silu<half>(cublasHandle_t handle,
                            int m, int n, int k,
                            const half* A,
                            const half* B,
-                           half* C) {
-    cublas_gemm<half>(handle, m, n, k, A, B, C);
+                           half* C,
+                           MemoryFormat format) {
+    cublas_gemm<half>(handle, m, n, k, A, B, C, format);
     
     int num_elements = m * n;
     const int block_size = 256;
@@ -204,8 +240,9 @@ void cublas_gemm_silu<float>(cublasHandle_t handle,
                             int m, int n, int k,
                             const float* A,
                             const float* B,
-                            float* C) {
-    cublas_gemm<float>(handle, m, n, k, A, B, C);
+                            float* C,
+                            MemoryFormat format) {
+    cublas_gemm<float>(handle, m, n, k, A, B, C, format);
     
     int num_elements = m * n;
     const int block_size = 256;
@@ -232,9 +269,10 @@ void cublas_gemm_bias<half>(cublasHandle_t handle,
                            const half* A,
                            const half* B,
                            const half* bias,
-                           half* C) {
+                           half* C,
+                           MemoryFormat format) {
     // 计算: C = A * B + bias (广播bias到每行)
-    cublas_gemm<half>(handle, m, n, k, A, B, C);
+    cublas_gemm<half>(handle, m, n, k, A, B, C, format);
     
     // 添加bias（广播到每行）
     const int block_size = 16;
@@ -254,8 +292,9 @@ void cublas_gemm_bias<float>(cublasHandle_t handle,
                             const float* A,
                             const float* B,
                             const float* bias,
-                            float* C) {
-    cublas_gemm<float>(handle, m, n, k, A, B, C);
+                            float* C,
+                            MemoryFormat format) {
+    cublas_gemm<float>(handle, m, n, k, A, B, C, format);
     const int block_size = 16;
     dim3 block_dim(block_size, block_size);
     dim3 grid_size(
