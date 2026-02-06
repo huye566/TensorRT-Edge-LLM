@@ -66,5 +66,5 @@ set_target_properties(NvInfer_edgellm_plugin PROPERTIES LIBRARY_OUTPUT_DIRECTORY
 target_include_directories(NvInfer_edgellm_plugin
                            PRIVATE ${COMMON_INCLUDE_DIRS})
 target_link_libraries(NvInfer_edgellm_plugin commonLibraryExt edgellmKernels
-                      ${CUDA_DRIVER_LIB} ${CUBLAS_LIB})
+                      ${CUDA_DRIVER_LIB} ${CUBLAS_LIB} ${CUBLASLT_LIB})
 add_cross_build_link_options(NvInfer_edgellm_plugin)

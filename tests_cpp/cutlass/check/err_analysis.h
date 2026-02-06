@@ -14,6 +14,8 @@
         } \
     } while(0)
 
+#define PRINT_BASE_ELE_NUM 5
+
 template<typename T>
 struct ErrorAnalysisResult {
     bool passed;
@@ -31,28 +33,29 @@ ErrorAnalysisResult<T> analyze_errors(
     int count = -1,
     double abs_tolerance = 1e-3,
     double rel_tolerance = 1e-3) {
-    
+
     ErrorAnalysisResult<T> result;
     result.passed = true;
     result.max_abs_error = 0.0;
     result.max_rel_error = 0.0;
     result.error_count = 0;
-    
+
     // 如果count为-1，则比较所有元素
     int total_elements = computed.size();
     if (count == -1) {
         count = total_elements - start_idx;
     }
-    
+
     // 确保索引范围有效
     int end_idx = std::min(start_idx + count, total_elements);
     result.total_count = end_idx - start_idx;
-    
+
+    int max_error_index = -1;
     for (int i = start_idx; i < end_idx; ++i) {
         // 转换为double进行比较
         double computed_f = 0.0;
         double reference_f = 0.0;
-        
+
         if constexpr (std::is_same<T, cutlass::half_t>::value) {
             computed_f = static_cast<double>(computed[i]);
             reference_f = static_cast<double>(reference[i]);
@@ -60,20 +63,41 @@ ErrorAnalysisResult<T> analyze_errors(
             computed_f = static_cast<double>(computed[i]);
             reference_f = static_cast<double>(reference[i]);
         }
-        
+
         double abs_error = std::abs(computed_f - reference_f);
-        double rel_error = (std::abs(reference_f) > 1e-9) ? 
+        double rel_error = (std::abs(reference_f) > 1e-9) ?
                           abs_error / std::abs(reference_f) : abs_error;
-        
+
         result.max_abs_error = std::max(result.max_abs_error, abs_error);
         result.max_rel_error = std::max(result.max_rel_error, rel_error);
-        
+
         // 检查是否超出容差
         if (abs_error > abs_tolerance && rel_error > rel_tolerance) {
+            if (result.max_rel_error == rel_error) max_error_index = i;
             result.error_count++;
+            if (result.error_count <= 5) {
+                std::cout << "  Err[" << i << "]: GPU=" << computed_f
+                          << ", REF=" << reference_f
+                          << ", abs_err=" << abs_error
+                          << ", rel_err=" << rel_error << std::endl;
+            }
+        } else {
+            if (i < PRINT_BASE_ELE_NUM) {
+                std::cout << "  Check[" << i << "]: GPU=" << computed_f
+                          << ", REF=" << reference_f
+                          << ", abs_err=" << abs_error
+                          << ", rel_err=" << rel_error << std::endl;
+            }
         }
     }
-    
+    if (max_error_index != -1) {
+        std::cout << "  Max error at index: " << max_error_index
+                  << ", GPU=" << static_cast<double>(computed[max_error_index])
+                  << ", REF=" << static_cast<double>(reference[max_error_index])
+                  << ", abs_err=" << result.max_abs_error
+                  << ", rel_err=" << result.max_rel_error << std::endl;
+    }
+
     result.passed = (result.error_count == 0);
     return result;
 }

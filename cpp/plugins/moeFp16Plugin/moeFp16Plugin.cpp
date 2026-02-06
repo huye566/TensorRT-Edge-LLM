@@ -58,7 +58,7 @@ MoeFp16Plugin::MoeFp16Plugin(std::string const& name, void const* data, size_t l
     deserializeValue(&data, &length, &mIntermediateSize);
     deserializeValue(&data, &length, &mExpertsNum);
     deserializeValue(&data, &length, &mExpertsTopK);
-    
+
     if (mExpertsTopK != 1) {
         printf("Warning: experts_topk > 1 not yet implemented, will use top-1\n");
     }
@@ -203,7 +203,7 @@ void MoeFp16Plugin::configurePlugin(nvinfer1::DynamicPluginTensorDesc const* in,
         } else {
             throw std::runtime_error("Invalid hidden_state dimensions");
         }
-        
+
         if (in[1].desc.dims.nbDims == 2) { // router_weight [hidden_size, experts_num]
             int inferred_hidden_size = in[1].desc.dims.d[0];
             if (mHiddenSize == 0) {
@@ -211,31 +211,31 @@ void MoeFp16Plugin::configurePlugin(nvinfer1::DynamicPluginTensorDesc const* in,
             } else if (mHiddenSize != inferred_hidden_size) {
                 throw std::runtime_error("Hidden size mismatch between hidden_state and router_weight");
             }
-            
+
             int inferred_experts_num = in[1].desc.dims.d[1];
             if (inferred_experts_num != mExpertsNum) {
                 throw std::runtime_error("Experts number mismatch");
             }
         }
-        
+
         if (in[3].desc.dims.nbDims == 3) { // gate_proj_weight [experts_num, hidden_size, intermediate_size]
             int inferred_experts_num = in[3].desc.dims.d[0];
             int inferred_hidden_size = in[3].desc.dims.d[1];
             mIntermediateSize = in[3].desc.dims.d[2];
-            
+
             if (inferred_experts_num != mExpertsNum) {
                 throw std::runtime_error("Experts number mismatch in gate_proj_weight");
             }
-            
+
             if (mHiddenSize != 0 && inferred_hidden_size != mHiddenSize) {
                 throw std::runtime_error("Hidden size mismatch in gate_proj_weight");
             }
-            
+
             if (mHiddenSize == 0) {
                 mHiddenSize = inferred_hidden_size;
             }
         }
-        
+
         if (in[4].desc.dims.nbDims == 3) { // up_proj_weight
             if (in[4].desc.dims.d[0] != mExpertsNum ||
                 in[4].desc.dims.d[1] != mHiddenSize ||
@@ -261,7 +261,7 @@ void MoeFp16Plugin::configurePlugin(nvinfer1::DynamicPluginTensorDesc const* in,
         }
     } catch (std::exception const& e) {
         printf("Error configuring MoE plugin: %s\n", e.what());
-        throw;
+        throw std::runtime_error("Error configuring MoE plugin");
     }
 }
 
@@ -273,19 +273,19 @@ size_t MoeFp16Plugin::getWorkspaceSize(nvinfer1::PluginTensorDesc const* inputs,
         printf("Warning: getWorkspaceSize called before configurePlugin\n");
         return 0;
     }
-    
+
     int32_t batchSize = inputs[0].dims.d[0];
     int32_t seqLen = inputs[0].dims.d[1];
-    
+
     size_t workspaceSize = 0;
-    
+
     // 计算各个缓冲区的大小
     int total_tokens = batchSize * seqLen;
-    
+
     // expert_indices: [total_tokens] (int32)
     workspaceSize = accumulateWorkspaceSize(
         workspaceSize, rt::Coords{total_tokens}, DataType::kINT32);
-    
+
     workspaceSize = plugins::accumulateWorkspaceSize(
         workspaceSize, rt::Coords{total_tokens}, nvinfer1::DataType::kINT32);
 
@@ -296,58 +296,58 @@ size_t MoeFp16Plugin::getWorkspaceSize(nvinfer1::PluginTensorDesc const* inputs,
     // expert_counts: [experts_num] (int32)
     workspaceSize = accumulateWorkspaceSize(
         workspaceSize, rt::Coords{mExpertsNum}, DataType::kINT32);
-    
+
     // expert_offsets: [experts_num + 1] (int32)
     workspaceSize = accumulateWorkspaceSize(
         workspaceSize, rt::Coords{mExpertsNum + 1}, DataType::kINT32);
-    
+
     // current_offsets: [experts_num] (int32)
     workspaceSize = accumulateWorkspaceSize(
         workspaceSize, rt::Coords{mExpertsNum}, DataType::kINT32);
-    
+
     // expert_input_buffer: [total_tokens, hidden_size] (half)
     workspaceSize = accumulateWorkspaceSize(
         workspaceSize, rt::Coords{total_tokens, mHiddenSize}, DataType::kHALF);
-    
+
     // gate_output: [total_tokens, intermediate_size] (half)
     workspaceSize = accumulateWorkspaceSize(
         workspaceSize, rt::Coords{total_tokens, mIntermediateSize}, DataType::kHALF);
-    
+
     // up_output: [total_tokens, intermediate_size] (half)
     workspaceSize = accumulateWorkspaceSize(
         workspaceSize, rt::Coords{total_tokens, mIntermediateSize}, DataType::kHALF);
-    
+
     // silu_output: [total_tokens, intermediate_size] (half)
     workspaceSize = accumulateWorkspaceSize(
         workspaceSize, rt::Coords{total_tokens, mIntermediateSize}, DataType::kHALF);
-    
+
     // hadamard_output: [total_tokens, intermediate_size] (half)
     workspaceSize = accumulateWorkspaceSize(
         workspaceSize, rt::Coords{total_tokens, mIntermediateSize}, DataType::kHALF);
-    
+
     // expert_output_buffer: [total_tokens, hidden_size] (half)
     workspaceSize = accumulateWorkspaceSize(
         workspaceSize, rt::Coords{total_tokens, mHiddenSize}, DataType::kHALF);
-    
+
     // 添加额外的对齐空间
     workspaceSize += kDEVICE_ALIGNMENT;
     printf("MoE Plugin workspace size: %zu bytes\n", workspaceSize);
-    
+
     return workspaceSize;
 }
 
 template<typename T>
-void printDeviceData(const T* device_ptr, size_t count, 
+void printDeviceData(const T* device_ptr, size_t count,
                      cudaStream_t stream, const std::string& label,
                      int print_count = 5, bool show_indices = false) {
     std::vector<T> host_data(count);
-    cudaMemcpyAsync(host_data.data(), device_ptr, 
+    cudaMemcpyAsync(host_data.data(), device_ptr,
                    count * sizeof(T), cudaMemcpyDeviceToHost, stream);
     cudaStreamSynchronize(stream);
-    
+
     printf("%s:\n", label.c_str());
     int actual_print_count = std::min(print_count, static_cast<int>(count));
-    
+
     if constexpr (std::is_same<T, half>::value) {
         printf("  Values (first %d):\n", actual_print_count);
         for (int i = 0; i < actual_print_count; ++i) {
@@ -397,45 +397,45 @@ void printDataInfo(MoeInputsParams &params, cudaStream_t stream) {
     printf("Expert Output Buffer Device Pointer: %p\n", (void*)params.expert_output_buffer);
 
     printf("Weight Data:\n");
-    printDeviceData<half>(params.router_weight, 
-                          hidden_size * experts_num, 
+    printDeviceData<half>(params.router_weight,
+                          hidden_size * experts_num,
                           stream, "Router weight data");
     for(int i = 0; i < experts_num; ++i) {
         printf("Expert %d:\n", i);
-        printDeviceData<half>(params.gate_proj_weight + i * hidden_size * intermediate_size, 
-                         hidden_size * intermediate_size, 
+        printDeviceData<half>(params.gate_proj_weight + i * hidden_size * intermediate_size,
+                         hidden_size * intermediate_size,
                          stream, "Gate projection weight data");
-        printDeviceData<half>(params.up_proj_weight + i * hidden_size * intermediate_size, 
-                            hidden_size * intermediate_size, 
+        printDeviceData<half>(params.up_proj_weight + i * hidden_size * intermediate_size,
+                            hidden_size * intermediate_size,
                             stream, "Up projection weight data");
-        printDeviceData<half>(params.down_proj_weight + i * hidden_size * intermediate_size, 
-                            hidden_size * intermediate_size, 
+        printDeviceData<half>(params.down_proj_weight + i * hidden_size * intermediate_size,
+                            hidden_size * intermediate_size,
                             stream, "Down projection weight data");
     }
 
     printf("Processing Data:\n");
-    printDeviceData<int32_t>(params.expert_indices, 
-                             total_tokens, 
+    printDeviceData<int32_t>(params.expert_indices,
+                             total_tokens,
                              stream, "Router indices", 5, true);
     for (int i = 0; i < total_tokens; ++i) {
         printf("[Token %d]:\n", i);
-        printDeviceData<half>(params.hidden_state + i * hidden_size, 
-                              hidden_size, 
+        printDeviceData<half>(params.hidden_state + i * hidden_size,
+                              hidden_size,
                               stream, "Input data");
-        printDeviceData<half>(params.gate_output + i * intermediate_size, 
-                              intermediate_size, 
+        printDeviceData<half>(params.gate_output + i * intermediate_size,
+                              intermediate_size,
                               stream, "Gate output data");
-        printDeviceData<half>(params.up_output + i * intermediate_size, 
-                              intermediate_size, 
+        printDeviceData<half>(params.up_output + i * intermediate_size,
+                              intermediate_size,
                               stream, "Up projection output data");
-        printDeviceData<half>(params.silu_output + i * intermediate_size, 
-                              intermediate_size, 
+        printDeviceData<half>(params.silu_output + i * intermediate_size,
+                              intermediate_size,
                               stream, "SiLU output data");
-        printDeviceData<half>(params.hadamard_output + i * intermediate_size, 
-                              intermediate_size, 
+        printDeviceData<half>(params.hadamard_output + i * intermediate_size,
+                              intermediate_size,
                               stream, "Hadamard output data");
-        printDeviceData<half>(params.output + i * hidden_size, 
-                              hidden_size, 
+        printDeviceData<half>(params.output + i * hidden_size,
+                              hidden_size,
                               stream, "Output data");
     }
 }
@@ -451,15 +451,15 @@ int32_t MoeFp16Plugin::enqueue(nvinfer1::PluginTensorDesc const* inputDesc,
         half* upProjWeight = reinterpret_cast<half*>(const_cast<void*>(inputs[4]));
         half* downProjWeight = reinterpret_cast<half*>(const_cast<void*>(inputs[5]));
         half* moeOut = reinterpret_cast<half*>(outputs[0]);
-        
+
         int32_t batchSize = inputDesc[0].dims.d[0];
         int32_t seqLen = inputDesc[0].dims.d[1];
-        
+
         if (mHiddenSize == 0 || mIntermediateSize == 0) {
             printf("Error: Plugin not properly configured before enqueue\n");
             return -1;
         }
-        
+
         if ((int)inputDesc[0].dims.d[2] != mHiddenSize) {
             printf("Error: Input hidden_size mismatch: expected %d, got %ld\n",
                    mHiddenSize, inputDesc[0].dims.d[2]);
@@ -467,59 +467,59 @@ int32_t MoeFp16Plugin::enqueue(nvinfer1::PluginTensorDesc const* inputDesc,
         }
         // 对齐workspace指针
         void* alignedWorkspacePtr = alignDevicePtr(workspace);
-        
+
         // 计算需要的缓冲区大小
         int total_tokens = batchSize * seqLen;
-        
+
         // 分配workspace缓冲区
         rt::Tensor expert_indices_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{total_tokens}, DataType::kINT32);
-        
+
         rt::Tensor router_logits_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{total_tokens, (mExpertsNum + 7) / 8 * 8}, DataType::kHALF);
 
         rt::Tensor token_to_buffer_map_tensor = plugins::assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{total_tokens}, nvinfer1::DataType::kINT32);
-        
+
         rt::Tensor expert_counts_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{mExpertsNum}, DataType::kINT32);
-        
+
         rt::Tensor expert_offsets_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{mExpertsNum + 1}, DataType::kINT32);
-        
+
         rt::Tensor current_offsets_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{mExpertsNum}, DataType::kINT32);
-        
+
         rt::Tensor expert_input_buffer_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{total_tokens, mHiddenSize}, DataType::kHALF);
-        
+
         rt::Tensor gate_output_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{total_tokens, mIntermediateSize}, DataType::kHALF);
-        
+
         rt::Tensor up_output_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{total_tokens, mIntermediateSize}, DataType::kHALF);
-        
+
         rt::Tensor silu_output_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{total_tokens, mIntermediateSize}, DataType::kHALF);
-        
+
         rt::Tensor hadamard_output_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{total_tokens, mIntermediateSize}, DataType::kHALF);
-        
+
         rt::Tensor expert_output_buffer_tensor = assignTensorFromWorkspace(
             alignedWorkspacePtr, rt::Coords{total_tokens, mHiddenSize}, DataType::kHALF);
 
         // 初始化workspace内存，todo @hy
-        // cudaMemsetAsync(expert_indices_tensor.rawPointer(), 0, 
+        // cudaMemsetAsync(expert_indices_tensor.rawPointer(), 0,
         //                expert_indices_tensor.getMemoryCapacity(), stream);
-        // cudaMemsetAsync(expert_counts_tensor.rawPointer(), 0, 
+        // cudaMemsetAsync(expert_counts_tensor.rawPointer(), 0,
         //                expert_counts_tensor.getMemoryCapacity(), stream);
-        // cudaMemsetAsync(current_offsets_tensor.rawPointer(), 0, 
+        // cudaMemsetAsync(current_offsets_tensor.rawPointer(), 0,
         //                current_offsets_tensor.getMemoryCapacity(), stream);
-        // cudaMemsetAsync(expert_offsets_tensor.rawPointer(), 0, 
+        // cudaMemsetAsync(expert_offsets_tensor.rawPointer(), 0,
         //                expert_offsets_tensor.getMemoryCapacity(), stream);
-        // cudaMemsetAsync(token_to_buffer_map_tensor.rawPointer(), 0, 
+        // cudaMemsetAsync(token_to_buffer_map_tensor.rawPointer(), 0,
         //                token_to_buffer_map_tensor.getMemoryCapacity(), stream);
-        
+
         // 设置MoeInputsParams
         MoeInputsParams params;
         params.hidden_state = hiddenState;
@@ -529,7 +529,7 @@ int32_t MoeFp16Plugin::enqueue(nvinfer1::PluginTensorDesc const* inputDesc,
         params.up_proj_weight = upProjWeight;
         params.down_proj_weight = downProjWeight;
         params.output = moeOut;
-        
+
         params.expert_indices = expert_indices_tensor.dataPointer<int32_t>();
         params.router_logits = router_logits_tensor.dataPointer<half>();
         params.token_to_buffer_map = token_to_buffer_map_tensor.dataPointer<int32_t>();
@@ -542,7 +542,7 @@ int32_t MoeFp16Plugin::enqueue(nvinfer1::PluginTensorDesc const* inputDesc,
         params.silu_output = silu_output_tensor.dataPointer<half>();
         params.hadamard_output = hadamard_output_tensor.dataPointer<half>();
         params.expert_output_buffer = expert_output_buffer_tensor.dataPointer<half>();
-        
+
         params.batch_size = batchSize;
         params.seq_len = seqLen;
         params.hidden_size = mHiddenSize;
@@ -576,7 +576,6 @@ int32_t MoeFp16Plugin::enqueue(nvinfer1::PluginTensorDesc const* inputDesc,
         params.router_weights_padded = reinterpret_cast<half*>(mWorkspace["router_weight"]);
         params.router_bias_padded = reinterpret_cast<half*>(mWorkspace["router_bias"]);
 
-        
         if (seqLen > 1) {
             // Context mode (prefill)
             context_moe_fp16_forward_cuda(params);
@@ -601,7 +600,7 @@ int32_t MoeFp16Plugin::enqueue(nvinfer1::PluginTensorDesc const* inputDesc,
 
 
 size_t MoeFp16Plugin::getSerializationSize() const noexcept {
-    return sizeof(mHiddenSize) + sizeof(mIntermediateSize) + 
+    return sizeof(mHiddenSize) + sizeof(mIntermediateSize) +
            sizeof(mExpertsNum) + sizeof(mExpertsTopK);
 }
 
@@ -666,11 +665,11 @@ nvinfer1::IPluginV2* MoeFp16PluginCreator::createPlugin(
         }
 
         MoeFp16Plugin* plugin = new MoeFp16Plugin(
-            std::string(name), 
-            expertsNum.value(), 
+            std::string(name),
+            expertsNum.value(),
             expertsTopK.value()
         );
-        
+
         return plugin;
     } catch (std::exception const& e) {
         printf("Error creating MoE plugin: %s\n", e.what());

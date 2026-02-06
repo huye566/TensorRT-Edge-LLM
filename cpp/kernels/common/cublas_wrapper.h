@@ -30,10 +30,10 @@ public:
 private:
     CublasWrapper();
     ~CublasWrapper();
-    
+
     CublasWrapper(const CublasWrapper&) = delete;
     CublasWrapper& operator=(const CublasWrapper&) = delete;
-    
+
     cublasHandle_t handle_;
     bool use_tensor_core_;
     bool initialized_;
@@ -45,7 +45,8 @@ void cublas_gemm(cublasHandle_t handle,
                 const T* A,
                 const T* B,
                 T* C,
-                MemoryFormat format = MemoryFormat::ROW_MAJOR);
+                MemoryFormat format = MemoryFormat::ROW_MAJOR,
+                cudaStream_t stream = 0);
 
 template<typename T>
 void cublas_gemm_silu(cublasHandle_t handle,
@@ -53,7 +54,8 @@ void cublas_gemm_silu(cublasHandle_t handle,
                      const T* A,
                      const T* B,
                      T* C,
-                     MemoryFormat format = MemoryFormat::ROW_MAJOR);
+                     MemoryFormat format = MemoryFormat::ROW_MAJOR,
+                     cudaStream_t stream = 0);
 
 template<typename T>
 void cublas_gemm_bias(cublasHandle_t handle,
@@ -62,7 +64,8 @@ void cublas_gemm_bias(cublasHandle_t handle,
                      const T* B,
                      const T* bias,
                      T* C,
-                     MemoryFormat format = MemoryFormat::ROW_MAJOR);
+                     MemoryFormat format = MemoryFormat::ROW_MAJOR,
+                     cudaStream_t stream = 0);
 
 } // namespace kernel
 } // namespace trt_edgellm

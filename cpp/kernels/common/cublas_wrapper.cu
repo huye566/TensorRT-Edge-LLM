@@ -23,7 +23,7 @@
 namespace trt_edgellm {
 namespace kernel {
 
-CublasWrapper::CublasWrapper() 
+CublasWrapper::CublasWrapper()
     : handle_(nullptr)
     , use_tensor_core_(false)
     , initialized_(false) {
@@ -36,15 +36,15 @@ CublasWrapper::~CublasWrapper() {
 
 bool CublasWrapper::initialize() {
     if (initialized_) return true;
-    
+
     cublasStatus_t status = cublasCreate(&handle_);
     if (status != CUBLAS_STATUS_SUCCESS) {
         std::cerr << "Failed to create cublas handle" << std::endl;
         return false;
     }
-    
+
     set_math_mode(true);
-    
+
     initialized_ = true;
     return true;
 }
@@ -97,8 +97,9 @@ void cublas_gemm<half>(cublasHandle_t handle,
                       const half* A,
                       const half* B,
                       half* C,
-                      MemoryFormat format) {
-    
+                      MemoryFormat format,
+                      cudaStream_t stream) {
+
     cublasStatus_t status;
     half alpha = 1.0f;
     half beta = 0.0f;
@@ -133,7 +134,7 @@ void cublas_gemm<half>(cublasHandle_t handle,
                          &beta,
                          C, data_type, ldc,
                          compute_type,
-                         CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+                         CUBLAS_GEMM_DEFAULT); // CUBLAS_GEMM_DEFAULT_TENSOR_OP
     } else { // (A * B)^T, out col major
         transA = CUBLAS_OP_T;
         transB = CUBLAS_OP_T;
@@ -153,7 +154,7 @@ void cublas_gemm<half>(cublasHandle_t handle,
                          &beta,
                          C, data_type, ldc,
                          compute_type,
-                         CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+                         CUBLAS_GEMM_DEFAULT); // CUBLAS_GEMM_DEFAULT_TENSOR_OP
     }
     CUBLAS_CHECK(status);
 }
@@ -164,8 +165,9 @@ void cublas_gemm<float>(cublasHandle_t handle,
                        const float* A,
                        const float* B,
                        float* C,
-                       MemoryFormat format) {
-    
+                       MemoryFormat format,
+                       cudaStream_t stream) {
+
     cublasStatus_t status;
     float alpha = 1.0f;
     float beta = 0.0f;
@@ -186,7 +188,7 @@ void cublas_gemm<float>(cublasHandle_t handle,
         lda = k;
         ldb = n;
         ldc = n;
-    
+
         status = cublasSgemm(handle,
                             transA,
                             transB,
@@ -224,14 +226,15 @@ void cublas_gemm_silu<half>(cublasHandle_t handle,
                            const half* A,
                            const half* B,
                            half* C,
-                           MemoryFormat format) {
-    cublas_gemm<half>(handle, m, n, k, A, B, C, format);
-    
+                           MemoryFormat format,
+                           cudaStream_t stream) {
+    cublas_gemm<half>(handle, m, n, k, A, B, C, format, stream);
+
     int num_elements = m * n;
     const int block_size = 256;
     const int grid_size = (num_elements + block_size - 1) / block_size;
-    
-    silu_kernel<half><<<grid_size, block_size>>>(C, num_elements);
+
+    silu_kernel<half><<<grid_size, block_size, 0, stream>>>(C, num_elements);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -241,14 +244,15 @@ void cublas_gemm_silu<float>(cublasHandle_t handle,
                             const float* A,
                             const float* B,
                             float* C,
-                            MemoryFormat format) {
-    cublas_gemm<float>(handle, m, n, k, A, B, C, format);
-    
+                            MemoryFormat format,
+                            cudaStream_t stream) {
+    cublas_gemm<float>(handle, m, n, k, A, B, C, format, stream);
+
     int num_elements = m * n;
     const int block_size = 256;
     const int grid_size = (num_elements + block_size - 1) / block_size;
-    
-    silu_kernel<float><<<grid_size, block_size>>>(C, num_elements);
+
+    silu_kernel<float><<<grid_size, block_size, 0, stream>>>(C, num_elements);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -256,7 +260,7 @@ template<typename T>
 __global__ void add_bias_kernel(T* C, const T* bias, int m, int n) {
     int row = blockIdx.x * blockDim.x + threadIdx.x;
     int col = blockIdx.y * blockDim.y + threadIdx.y;
-    
+
     if (row < m && col < n) {
         int idx = row * n + col;
         C[idx] += bias[col];  // bias按列广播
@@ -270,10 +274,11 @@ void cublas_gemm_bias<half>(cublasHandle_t handle,
                            const half* B,
                            const half* bias,
                            half* C,
-                           MemoryFormat format) {
+                           MemoryFormat format,
+                           cudaStream_t stream) {
     // 计算: C = A * B + bias (广播bias到每行)
-    cublas_gemm<half>(handle, m, n, k, A, B, C, format);
-    
+    cublas_gemm<half>(handle, m, n, k, A, B, C, format, stream);
+
     // 添加bias（广播到每行）
     const int block_size = 16;
     dim3 block_dim(block_size, block_size);
@@ -281,8 +286,8 @@ void cublas_gemm_bias<half>(cublasHandle_t handle,
         (m + block_size - 1) / block_size,
         (n + block_size - 1) / block_size
     );
-    
-    add_bias_kernel<half><<<grid_size, block_dim>>>(C, bias, m, n);
+
+    add_bias_kernel<half><<<grid_size, block_dim, 0, stream>>>(C, bias, m, n);
     CUDA_CHECK(cudaGetLastError());
 }
 
@@ -293,16 +298,17 @@ void cublas_gemm_bias<float>(cublasHandle_t handle,
                             const float* B,
                             const float* bias,
                             float* C,
-                            MemoryFormat format) {
-    cublas_gemm<float>(handle, m, n, k, A, B, C, format);
+                            MemoryFormat format,
+                            cudaStream_t stream) {
+    cublas_gemm<float>(handle, m, n, k, A, B, C, format, stream);
     const int block_size = 16;
     dim3 block_dim(block_size, block_size);
     dim3 grid_size(
         (m + block_size - 1) / block_size,
         (n + block_size - 1) / block_size
     );
-    
-    add_bias_kernel<float><<<grid_size, block_dim>>>(C, bias, m, n);
+
+    add_bias_kernel<float><<<grid_size, block_dim, 0, stream>>>(C, bias, m, n);
     CUDA_CHECK(cudaGetLastError());
 }
 

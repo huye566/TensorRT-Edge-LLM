@@ -30,21 +30,21 @@ void compute_cpu_reference(
     // 计算实际需要验证的元素数量
     int total_elements = M * N;
     int verify_count = std::min(total_elements, max_elements);
-    
+
     // 初始化参考结果向量
     h_ref.resize(total_elements);
-    
+
     // 只计算前verify_count个元素
     for (int idx = 0; idx < verify_count; ++idx) {
         int m = idx / N;
         int n = idx % N;
         ElementAccumulator accum = 0.0;
-        
+
         // 计算矩阵乘法部分
         for (int k = 0; k < K; ++k) {
             // A是行主序，B是列主序
             ElementAccumulator a_val, b_val;
-            
+
             if constexpr (std::is_same<ElementA, cutlass::half_t>::value) {
                 a_val = static_cast<ElementAccumulator>(h_A[m * K + k]);
                 b_val = static_cast<ElementAccumulator>(h_B[k + n * K]); // B列主序访问
@@ -52,10 +52,10 @@ void compute_cpu_reference(
                 a_val = static_cast<ElementAccumulator>(h_A[m * K + k]);
                 b_val = static_cast<ElementAccumulator>(h_B[k + n * K]); // B列主序访问
             }
-            
+
             accum += a_val * b_val;
         }
-        
+
         // 加上alpha和beta的影响
         ElementAccumulator c_val;
         if constexpr (std::is_same<ElementC, cutlass::half_t>::value) {
@@ -63,9 +63,9 @@ void compute_cpu_reference(
         } else {
             c_val = static_cast<ElementAccumulator>(h_C[m * N + n]);
         }
-        
+
         accum = alpha * accum + beta * c_val;
-        
+
         // 存储结果
         if constexpr (std::is_same<ElementC, cutlass::half_t>::value) {
             h_ref[m * N + n] = cutlass::half_t(static_cast<float>(accum));
@@ -77,45 +77,45 @@ void compute_cpu_reference(
 
 
 template<typename ElementA, typename ElementB, typename ElementC, typename ElementAccumulator>
-TestResult benchmark_gemm_template(int M, int N, int K, int iterations = 10, 
+TestResult benchmark_gemm_template(int M, int N, int K, int iterations = 10,
                                    double alpha = 1.0, double beta = 0.0) {
-    
+
     TestResult result;
     result.M = M;
     result.N = N;
     result.K = K;
     result.operation = "GEMM";
-    
+
     if constexpr (std::is_same<ElementA, cutlass::half_t>::value) {
         result.data_type = "FP16";
     } else if constexpr (std::is_same<ElementA, float>::value) {
         result.data_type = "FP32";
     }
-    
+
     // 定义数据类型别名
     using ElementInputA = ElementA;
     using ElementInputB = ElementB;
     using ElementOutput = ElementC;
-    
+
     // 定义布局
     using LayoutInputA = cutlass::layout::RowMajor;    // A矩阵行主序
     using LayoutInputB = cutlass::layout::ColumnMajor; // B矩阵列主序
     using LayoutOutput = cutlass::layout::RowMajor;    // 输出行主序
-    
+
     // 定义计算相关类型
     using ElementComputeEpilogue = ElementAccumulator;
     using SmArch = cutlass::arch::Sm80;
-    
+
     std::ostringstream oss;
     oss << "(" << M << "," << K << "," << N << ")";
     result.test_case = oss.str();
-    
+
     // 创建主机端数据
     std::vector<ElementInputA> h_A(M * K);
     std::vector<ElementInputB> h_B(K * N);
     std::vector<ElementOutput> h_C(M * N);
     std::vector<ElementOutput> h_ref(M * N);
-    
+
     // 初始化数据
     for (int i = 0; i < M * K; ++i) {
         h_A[i] = random_value<ElementInputA>();
@@ -126,27 +126,27 @@ TestResult benchmark_gemm_template(int M, int N, int K, int iterations = 10,
     for (int i = 0; i < M * N; ++i) {
         h_C[i] = random_value<ElementOutput>();
     }
-    
+
     // 设备端内存分配
     ElementInputA* d_A = nullptr;
     ElementInputB* d_B = nullptr;
     ElementOutput* d_C = nullptr;
     ElementOutput* d_D = nullptr;
-    
+
     size_t size_A = sizeof(ElementInputA) * M * K;
     size_t size_B = sizeof(ElementInputB) * K * N;
     size_t size_C = sizeof(ElementOutput) * M * N;
-    
+
     CUDA_CHECK(cudaMalloc(&d_A, size_A));
     CUDA_CHECK(cudaMalloc(&d_B, size_B));
     CUDA_CHECK(cudaMalloc(&d_C, size_C));
     CUDA_CHECK(cudaMalloc(&d_D, size_C));
-    
+
     // 拷贝数据到设备
     CUDA_CHECK(cudaMemcpy(d_A, h_A.data(), size_A, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_B, h_B.data(), size_B, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_C, h_C.data(), size_C, cudaMemcpyHostToDevice));
-    
+
     // 根据数据类型选择不同的配置
     if constexpr (std::is_same<ElementA, cutlass::half_t>::value) {
         // 对于半精度，使用Tensor Core
@@ -154,14 +154,14 @@ TestResult benchmark_gemm_template(int M, int N, int K, int iterations = 10,
         using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<128, 128, 32>;
         using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 32>;
         using ShapeMMAOp = cutlass::gemm::GemmShape<16, 8, 16>;
-        
+
         // 定义Epilogue操作
         using EpilogueOp = cutlass::epilogue::thread::LinearCombination<
             ElementOutput,
             128 / cutlass::sizeof_bits<ElementOutput>::value,
             ElementAccumulator,
             ElementComputeEpilogue>;
-        
+
         // 定义Gemm类型
         using Gemm = cutlass::gemm::device::Gemm<
             ElementInputA,           // ElementA
@@ -180,31 +180,31 @@ TestResult benchmark_gemm_template(int M, int N, int K, int iterations = 10,
             cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>,
             3>;                      // Stages
             // 2, 8, 1 可以支持<1,2048>*<2048,3>
-        
+
         // 根据参考代码的方式构造参数
         cutlass::gemm::GemmCoord problem_size(M, N, K);
-        
+
         // 计算步长
         int lda = K;  // A行主序，所以lda = K
         int ldb = K;  // B列主序，所以ldb = K
         int ldc = N;  // C行主序，所以ldc = N
         int ldd = N;  // D行主序，所以ldd = N
-        
+
         // 创建TensorRef
         cutlass::TensorRef<ElementInputA, LayoutInputA> input_ref(
             d_A, LayoutInputA(lda));
-        
+
         cutlass::TensorRef<ElementInputB, LayoutInputB> weights_ref(
             d_B, LayoutInputB(ldb));
-        
+
         // 如果beta != 0，需要传递C矩阵
         cutlass::TensorRef<ElementOutput, LayoutOutput> output_ref(
             d_D, LayoutOutput(ldd));
-        
+
         cutlass::TensorRef<ElementOutput, LayoutOutput> c_ref(
-            beta != 0.0 ? d_C : nullptr, 
+            beta != 0.0 ? d_C : nullptr,
             LayoutOutput(ldc));
-        
+
         // 创建参数
         typename Gemm::Arguments arguments{
             problem_size,
@@ -213,7 +213,7 @@ TestResult benchmark_gemm_template(int M, int N, int K, int iterations = 10,
             c_ref,
             output_ref,
             {ElementAccumulator(alpha), ElementAccumulator(beta)}};
-        
+
         // 检查是否可以实现
         cutlass::Status status = Gemm::can_implement(arguments);
         if (status != cutlass::Status::kSuccess) {
@@ -225,79 +225,79 @@ TestResult benchmark_gemm_template(int M, int N, int K, int iterations = 10,
             result.passed = false;
             return result;
         }
-        
+
         // 获取工作空间大小并分配
         size_t workspace_size = Gemm::get_workspace_size(arguments);
         cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
-        
+
         // 创建并初始化Gemm操作符
         Gemm gemm_op;
         status = gemm_op.initialize(arguments, workspace.get());
         CUTLASS_CHECK(status);
-        
+
         // 预热运行
         status = gemm_op();
         CUTLASS_CHECK(status);
         CUDA_CHECK(cudaDeviceSynchronize());
-        
+
         // 性能测试
         cudaEvent_t start, stop;
         CUDA_CHECK(cudaEventCreate(&start));
         CUDA_CHECK(cudaEventCreate(&stop));
-        
+
         double total_time_ms = 0.0;
         double min_time_ms = std::numeric_limits<double>::max();
         double max_time_ms = 0.0;
-        
+
         for (int i = 0; i < iterations; ++i) {
             CUDA_CHECK(cudaEventRecord(start));
-            
+
             status = gemm_op();
             CUTLASS_CHECK(status);
-            
+
             CUDA_CHECK(cudaEventRecord(stop));
             CUDA_CHECK(cudaEventSynchronize(stop));
-            
+
             float elapsed_ms = 0.0f;
             CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms, start, stop));
-            
+
             total_time_ms += elapsed_ms;
             min_time_ms = std::min(min_time_ms, static_cast<double>(elapsed_ms));
             max_time_ms = std::max(max_time_ms, static_cast<double>(elapsed_ms));
         }
-        
+
         result.avg_time_ms = total_time_ms / iterations;
         result.min_time_ms = min_time_ms;
         result.max_time_ms = max_time_ms;
-        
+
         // 计算性能指标
         double flops = 2.0 * M * N * K;  // GEMM的FLOPs计数: 2MNK
         result.avg_tflops = (flops / result.avg_time_ms) / 1e9;
         result.min_tflops = (flops / result.max_time_ms) / 1e9;  // 最小时间对应最大性能
         result.max_tflops = (flops / result.min_time_ms) / 1e9;  // 最大时间对应最小性能
-        
+
         // 带宽计算
         size_t bytes_transferred = (M * K + K * N + 2 * M * N) * sizeof(ElementInputA);
         result.avg_bandwidth_gbs = (bytes_transferred / result.avg_time_ms) / 1e6;
-        
+
         // 清理事件
         CUDA_CHECK(cudaEventDestroy(start));
         CUDA_CHECK(cudaEventDestroy(stop));
-        
+
     } else if constexpr (std::is_same<ElementA, float>::value) {
         // 对于单精度，使用SIMT
         using MMAOp = cutlass::arch::OpClassSimt;
         using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<128, 128, 8>;
         using ShapeMMAWarp = cutlass::gemm::GemmShape<32, 64, 8>;
         using ShapeMMAOp = cutlass::gemm::GemmShape<1, 1, 1>;
-        
+
         // 定义Epilogue操作
         using EpilogueOp = cutlass::epilogue::thread::LinearCombination<
             ElementOutput,
             1,  // SIMT使用标量操作
             ElementAccumulator,
             ElementComputeEpilogue>;
-        
+
         // 定义Gemm类型
         using Gemm = cutlass::gemm::device::Gemm<
             ElementInputA,           // ElementA
@@ -315,31 +315,31 @@ TestResult benchmark_gemm_template(int M, int N, int K, int iterations = 10,
             EpilogueOp,              // Epilogue operator
             cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>,
             2>;                      // Stages
-        
+
         // 根据参考代码的方式构造参数
         cutlass::gemm::GemmCoord problem_size(M, N, K);
-        
+
         // 计算步长
         int lda = K;  // A行主序，所以lda = K
         int ldb = K;  // B列主序，所以ldb = K
         int ldc = N;  // C行主序，所以ldc = N
         int ldd = N;  // D行主序，所以ldd = N
-        
+
         // 创建TensorRef
         cutlass::TensorRef<ElementInputA, LayoutInputA> input_ref(
             d_A, LayoutInputA(lda));
-        
+
         cutlass::TensorRef<ElementInputB, LayoutInputB> weights_ref(
             d_B, LayoutInputB(ldb));
-        
+
         // 如果beta != 0，需要传递C矩阵
         cutlass::TensorRef<ElementOutput, LayoutOutput> output_ref(
             d_D, LayoutOutput(ldd));
-        
+
         cutlass::TensorRef<ElementOutput, LayoutOutput> c_ref(
-            beta != 0.0 ? d_C : nullptr, 
+            beta != 0.0 ? d_C : nullptr,
             LayoutOutput(ldc));
-        
+
         // 创建参数
         typename Gemm::Arguments arguments{
             problem_size,
@@ -348,7 +348,7 @@ TestResult benchmark_gemm_template(int M, int N, int K, int iterations = 10,
             c_ref,
             output_ref,
             {ElementAccumulator(alpha), ElementAccumulator(beta)}};
-        
+
         // 检查是否可以实现
         cutlass::Status status = Gemm::can_implement(arguments);
         if (status != cutlass::Status::kSuccess) {
@@ -360,102 +360,102 @@ TestResult benchmark_gemm_template(int M, int N, int K, int iterations = 10,
             result.passed = false;
             return result;
         }
-        
+
         // 获取工作空间大小并分配
         size_t workspace_size = Gemm::get_workspace_size(arguments);
         cutlass::device_memory::allocation<uint8_t> workspace(workspace_size);
-        
+
         // 创建并初始化Gemm操作符
         Gemm gemm_op;
         status = gemm_op.initialize(arguments, workspace.get());
         CUTLASS_CHECK(status);
-        
+
         // 预热运行
         status = gemm_op();
         CUTLASS_CHECK(status);
         CUDA_CHECK(cudaDeviceSynchronize());
-        
+
         // 性能测试
         cudaEvent_t start, stop;
         CUDA_CHECK(cudaEventCreate(&start));
         CUDA_CHECK(cudaEventCreate(&stop));
-        
+
         double total_time_ms = 0.0;
         double min_time_ms = std::numeric_limits<double>::max();
         double max_time_ms = 0.0;
-        
+
         for (int i = 0; i < iterations; ++i) {
             CUDA_CHECK(cudaEventRecord(start));
-            
+
             status = gemm_op();
             CUTLASS_CHECK(status);
-            
+
             CUDA_CHECK(cudaEventRecord(stop));
             CUDA_CHECK(cudaEventSynchronize(stop));
-            
+
             float elapsed_ms = 0.0f;
             CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms, start, stop));
-            
+
             total_time_ms += elapsed_ms;
             min_time_ms = std::min(min_time_ms, static_cast<double>(elapsed_ms));
             max_time_ms = std::max(max_time_ms, static_cast<double>(elapsed_ms));
         }
-        
+
         result.avg_time_ms = total_time_ms / iterations;
         result.min_time_ms = min_time_ms;
         result.max_time_ms = max_time_ms;
-        
+
         // 计算性能指标
         double flops = 2.0 * M * N * K;  // GEMM的FLOPs计数: 2MNK
         result.avg_tflops = (flops / result.avg_time_ms) / 1e9;
         result.min_tflops = (flops / result.max_time_ms) / 1e9;  // 最小时间对应最大性能
         result.max_tflops = (flops / result.min_time_ms) / 1e9;  // 最大时间对应最小性能
-        
+
         // 带宽计算
         size_t bytes_transferred = (M * K + K * N + 2 * M * N) * sizeof(ElementInputA);
         result.avg_bandwidth_gbs = (bytes_transferred / result.avg_time_ms) / 1e6;
-        
+
         // 清理事件
         CUDA_CHECK(cudaEventDestroy(start));
         CUDA_CHECK(cudaEventDestroy(stop));
     }
     result.iterations = iterations;
-    
+
     // 使用封装的CPU参考计算函数
     compute_cpu_reference<ElementInputA, ElementInputB, ElementOutput, ElementAccumulator>(
         h_ref, h_A, h_B, h_C, M, N, K, alpha, beta, MAX_COMPARE_COUNT);
-    
+
     // 获取GPU结果
     std::vector<ElementOutput> h_D(M * N);
     CUDA_CHECK(cudaMemcpy(h_D.data(), d_D, size_C, cudaMemcpyDeviceToHost));
-    
+
     // 使用公共函数进行误差分析
     // 根据数据类型设置不同的容差
     double abs_tolerance = 1e-3;
     double rel_tolerance = 1e-3;
-    
+
     if constexpr (std::is_same<ElementA, cutlass::half_t>::value) {
         abs_tolerance = 1e-2;
         rel_tolerance = 1e-2;
     }
-    
+
     // 计算实际验证的元素数量
     result.verify_count = std::min(M * N, MAX_COMPARE_COUNT);
-    
+
     auto error_result = analyze_errors(h_D, h_ref, 0, result.verify_count, abs_tolerance, rel_tolerance);
-    
+
     result.max_abs_error = error_result.max_abs_error;
     result.max_rel_error = error_result.max_rel_error;
     result.passed = error_result.passed;
     result.error_count = error_result.error_count;
     result.total_count = error_result.total_count;
-    
+
     // 清理设备内存
     CUDA_CHECK(cudaFree(d_A));
     CUDA_CHECK(cudaFree(d_B));
     CUDA_CHECK(cudaFree(d_C));
     CUDA_CHECK(cudaFree(d_D));
-    
+
     return result;
 }
 
@@ -465,7 +465,7 @@ TestResult benchmark_gemm_half(int M, int N, int K, int iterations) {
     using ElementB = cutlass::half_t;
     using ElementC = cutlass::half_t;
     using ElementAccumulator = float;
-    
+
     return benchmark_gemm_template<ElementA, ElementB, ElementC, ElementAccumulator>(
         M, N, K, iterations, 1.0, 0.0);
 }
@@ -475,7 +475,7 @@ TestResult benchmark_gemm_float(int M, int N, int K, int iterations) {
     using ElementB = float;
     using ElementC = float;
     using ElementAccumulator = float;
-    
+
     return benchmark_gemm_template<ElementA, ElementB, ElementC, ElementAccumulator>(
         M, N, K, iterations, 1.0, 0.0);
 }

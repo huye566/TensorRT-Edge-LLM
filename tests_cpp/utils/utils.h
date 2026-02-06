@@ -60,7 +60,7 @@ bool saveSafetensors(const std::filesystem::path& filepath,
                      const std::vector<Tensor>& tensors,
                      cudaStream_t stream);
 bool loadMoeData(std::vector<Tensor>& moeInputTensors,
-                 std::vector<Tensor>& moeWeightsTensors, 
+                 std::vector<Tensor>& moeWeightsTensors,
                  cudaStream_t stream);
 bool loadMoeIntermediateRes(std::vector<Tensor>& intermediateResTensors,
                             cudaStream_t stream);
@@ -76,17 +76,17 @@ namespace trt_edgellm {
 namespace rt {
 
 template<typename T>
-void printDeviceData(const T* device_ptr, size_t count, 
+void printDeviceData(const T* device_ptr, size_t count,
                      cudaStream_t stream, const std::string& label,
                      int print_count = 5, bool show_indices = false) {
     std::vector<T> host_data(count);
-    cudaMemcpyAsync(host_data.data(), device_ptr, 
+    cudaMemcpyAsync(host_data.data(), device_ptr,
                    count * sizeof(T), cudaMemcpyDeviceToHost, stream);
     cudaStreamSynchronize(stream);
-    
+
     LOG_INFO("%s:", label.c_str());
     int actual_print_count = std::min(print_count, static_cast<int>(count));
-    
+
     if constexpr (std::is_same<T, half>::value) {
         LOG_INFO("  Values (first %d):", actual_print_count);
         for (int i = 0; i < actual_print_count; ++i) {

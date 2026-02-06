@@ -63,6 +63,22 @@ void cutlass_gemm_grouped(ElementOutput* output,
                           std::vector<cutlass::gemm::GemmCoord>& problem_sizes,
                           cudaStream_t stream = 0);
 
+template <bool kEnableSilu = false, bool kEnableBias = false>
+void cutlass_gemm_standard(ElementOutput* output,
+                  const ElementInputA* input,
+                  const ElementInputB* weights,
+                  const ElementOutput* bias,
+                  int M, int N, int K,
+                  cudaStream_t stream = 0);
+
+template <bool kEnableSilu = false, bool kEnableBias = false>
+void cutlass_gemv(ElementOutput* output,
+                  const ElementInputA* input,
+                  const ElementInputB* weights,
+                  const ElementOutput* bias,
+                  int M, int N, int K,
+                  cudaStream_t stream = 0);
+
 } // namespace kernel
 } // namespace trt_edgellm
 

@@ -12,11 +12,11 @@ PathConfig& PathConfig::getInstance() {
 PathConfig::PathConfig() {
     std::filesystem::path currentPath = std::filesystem::current_path();
 
-    while (!currentPath.empty() && 
+    while (!currentPath.empty() &&
            !std::filesystem::exists(currentPath / "tests_cpp")) {
         currentPath = currentPath.parent_path();
     }
-    
+
     projectRoot_ = currentPath;
     initDefaultPaths();
 }
@@ -67,7 +67,7 @@ std::filesystem::path PathConfig::getSafetensorPath(const std::string& filename)
     if (std::filesystem::exists(fullPath)) {
         return fullPath;
     }
-    
+
     return fullPath;
 }
 

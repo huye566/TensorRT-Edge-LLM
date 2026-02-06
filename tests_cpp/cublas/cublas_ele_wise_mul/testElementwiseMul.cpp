@@ -32,10 +32,10 @@ void print_elementwise_results_table(const std::vector<TestResult>& results,
     const int col10 = 15; // 最大绝对误差
     const int col11 = 18; // 验证元素数
     const int col12 = 10; // 正确性
-    
-    int total_width = col1 + col2 + col3 + col4 + col5 + col6 + col7 + 
+
+    int total_width = col1 + col2 + col3 + col4 + col5 + col6 + col7 +
                      col8 + col9 + col10 + col11 + col12;
-    
+
     // 打印表头
     std::cout << "\n";
     std::cout << std::string(total_width, '=') << "\n";
@@ -56,9 +56,9 @@ void print_elementwise_results_table(const std::vector<TestResult>& results,
               << std::setw(col11) << "VerifiedElements"
               << std::setw(col12) << "Check"
               << "\n";
-    
+
     std::cout << std::string(total_width, '-') << "\n";
-    
+
     // 打印每一行数据
     for (size_t i = 0; i < results.size(); ++i) {
         const auto& result = results[i];
@@ -66,21 +66,21 @@ void print_elementwise_results_table(const std::vector<TestResult>& results,
         const int rows = rows_vec[i];
         const int cols = cols_vec[i];
         int total_elements = rows * cols;
-        
+
         std::ostringstream shape_oss;
         shape_oss << "(" << rows << "," << cols << ")";
-        
+
         std::ostringstream verify_oss;
         if (result.verify_count < total_elements) {
             verify_oss << result.verify_count << "/" << total_elements;
         } else {
             verify_oss << result.verify_count;
         }
-        
+
         // 将TFLOPS转换回GFLOPS
         double avg_gflops = result.avg_tflops * 1000.0;
         double max_gflops = result.max_tflops * 1000.0;
-        
+
         std::cout << std::left
                   << std::setw(col1) << result.test_case
                   << std::setw(col2) << result.data_type
@@ -103,14 +103,14 @@ void print_elementwise_results_table(const std::vector<TestResult>& results,
         }
         std::cout << "\n";
     }
-    
+
     std::cout << std::string(total_width, '-') << "\n";
-    
+
     // 打印统计信息
     int total_tests = results.size();
-    int passed_tests = std::count_if(results.begin(), results.end(), 
+    int passed_tests = std::count_if(results.begin(), results.end(),
                                      [](const TestResult& r) { return r.passed; });
-    
+
     // 按数据类型和实现方式分组统计性能
     std::map<std::string, std::vector<double>> perf_by_group;
     for (size_t i = 0; i < results.size(); ++i) {
@@ -120,22 +120,22 @@ void print_elementwise_results_table(const std::vector<TestResult>& results,
         double avg_gflops = result.avg_tflops * 1000.0;
         perf_by_group[group].push_back(avg_gflops);
     }
-    
+
     std::cout << "\n统计信息:\n";
     std::cout << "总测试数: " << total_tests << "\n";
     std::cout << "通过测试: " << passed_tests << "\n";
     std::cout << "失败测试: " << (total_tests - passed_tests) << "\n";
-    std::cout << "通过率: " << std::fixed << std::setprecision(1) 
+    std::cout << "通过率: " << std::fixed << std::setprecision(1)
               << (static_cast<double>(passed_tests) / total_tests * 100) << "%\n";
-    
+
     std::cout << "\n平均性能统计 (GFLOPS):\n";
     for (const auto& group : perf_by_group) {
-        double avg_perf = std::accumulate(group.second.begin(), 
+        double avg_perf = std::accumulate(group.second.begin(),
                                           group.second.end(), 0.0) / group.second.size();
-        std::cout << "  " << group.first << ": " 
+        std::cout << "  " << group.first << ": "
                   << std::fixed << std::setprecision(3) << avg_perf << " GFLOPS\n";
     }
-    
+
     // 打印验证策略说明
     std::cout << "\n验证策略说明:\n";
     std::cout << "1. 当输出向量长度 > " << MAX_COMPARE_COUNT << " 时，只计算和验证前" << MAX_COMPARE_COUNT << "个元素\n";
@@ -149,30 +149,30 @@ void print_elementwise_results_table(const std::vector<TestResult>& results,
 
 int main(int argc, char** argv) {
     print_device_info(2);
-    
+
     srand(2026);
-    
+
     // 定义测试用例
     struct TestCase {
         int rows;
         int cols;
         std::string description;
     };
-    
+
     std::vector<TestCase> test_cases = {
         {1, 6144, "<1,6144>"},
         {530, 6144, "<530,6144>"},
     };
-    
+
     std::vector<TestResult> all_test_results;
     std::vector<std::string> all_impl_types;
     std::vector<int> all_rows;
     std::vector<int> all_cols;
-    
+
     int iterations = 100;  // Element-wise操作较快，可以增加迭代次数
-    
+
     std::cout << "开始Element-wise乘法性能测试...\n";
-    
+
     // 运行所有测试用例
     for (const auto& test_case : test_cases) {
         std::cout << "\n测试形状: " << test_case.description << "\n";
@@ -185,7 +185,7 @@ int main(int argc, char** argv) {
         all_rows.push_back(test_case.rows);
         all_cols.push_back(test_case.cols);
         std::cout << " 完成\n";
-        
+
         // Thrust实现 - half
         std::cout << "  Thrust FP16...";
         auto result_fp16_thrust = benchmark_elementwise_mul_thrust_half(
@@ -219,12 +219,12 @@ int main(int argc, char** argv) {
         all_cols.push_back(test_case.cols);
         std::cout << " 完成\n";
     }
-    
+
     // 打印汇总表格
     print_elementwise_results_table(all_test_results, all_impl_types, all_rows, all_cols);
-    
+
     std::cout << "\n\n所有Element-wise乘法测试完成!\n";
-    
+
     // 性能对比总结
     std::cout << "\n性能对比总结:\n";
     std::cout << "1. 对于小尺寸 (<128,128>): CUDA和Thrust性能接近\n";
@@ -232,6 +232,6 @@ int main(int argc, char** argv) {
     std::cout << "3. 2D CUDA核函数对于矩阵形状有更好的性能\n";
     std::cout << "4. FP16比FP32带宽更高，但计算精度较低\n";
     std::cout << "5. Thrust实现代码更简洁，但性能可能略低于优化后的CUDA实现\n";
-    
+
     return 0;
 }

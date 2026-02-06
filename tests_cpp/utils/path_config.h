@@ -16,16 +16,16 @@ public:
     std::filesystem::path getTestDataPath() const;
     std::filesystem::path getSafetensorPath(const std::string& filename) const;
     void setCustomPath(const std::string& key, const std::filesystem::path& path);
-    
+
 private:
     PathConfig();
     void initDefaultPaths();
-    
+
 private:
     std::filesystem::path projectRoot_;
     std::filesystem::path resourcesRoot_;
     std::filesystem::path testDataRoot_;
-    
+
     // 自定义路径映射
     std::unordered_map<std::string, std::filesystem::path> customPaths_;
 };

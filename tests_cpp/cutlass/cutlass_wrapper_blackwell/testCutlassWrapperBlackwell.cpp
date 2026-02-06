@@ -19,8 +19,8 @@ void print_blackwell_results_table(const std::vector<TestResult>& results) {
     const int col10 = 20; // 验证元素数
     const int col11 = 15; // 正确性
     const int offset = 0;
-    
-    int total_width = col1 + col2 + col3 + col4 + col5 + col6 + col7 + 
+
+    int total_width = col1 + col2 + col3 + col4 + col5 + col6 + col7 +
                      col8 + col9 + col10 + col11;
     total_width = total_width - offset * 11;
 
@@ -43,14 +43,14 @@ void print_blackwell_results_table(const std::vector<TestResult>& results) {
               << std::setw(col10) << "VerifiedElements"
               << std::setw(col11) << "Check"
               << "\n";
-    
+
     std::cout << std::string(total_width, '-') << "\n";
-    
+
     // 打印每一行数据
     for (const auto& result : results) {
         std::ostringstream size_oss;
         size_oss << "(" << result.M << "," << result.K << ")*(" << result.K << "," << result.N << ")";
-        
+
         // 格式化验证元素数显示
         std::ostringstream verify_oss;
         int total_elements = result.M * result.N;
@@ -59,7 +59,7 @@ void print_blackwell_results_table(const std::vector<TestResult>& results) {
         } else {
             verify_oss << result.verify_count;
         }
-        
+
         std::cout << std::left
                   << std::setw(col1 - offset) << result.test_case
                   << std::setw(col2 - offset) << result.data_type
@@ -81,26 +81,26 @@ void print_blackwell_results_table(const std::vector<TestResult>& results) {
         }
         std::cout << "\n";
     }
-    
+
     std::cout << std::string(total_width, '-') << "\n";
-    
+
     // 打印统计信息
     int total_tests = results.size();
     int passed_tests = std::count_if(results.begin(), results.end(), [](const TestResult& r) { return r.passed; });
-    
+
     std::cout << "\n统计信息:\n";
     std::cout << "总测试数: " << total_tests << "\n";
     std::cout << "通过测试: " << passed_tests << "\n";
     std::cout << "失败测试: " << (total_tests - passed_tests) << "\n";
-    std::cout << "通过率: " << std::fixed << std::setprecision(1) 
+    std::cout << "通过率: " << std::fixed << std::setprecision(1)
               << (static_cast<double>(passed_tests) / total_tests * 100) << "%\n";
-    
+
     // 按操作类型统计平均性能
     std::map<std::string, std::vector<double>> perf_by_op;
     for (const auto& result : results) {
         perf_by_op[result.operation].push_back(result.avg_tflops);
     }
-    
+
     std::cout << "\n各操作类型平均性能:\n";
     for (const auto& [op, perfs] : perf_by_op) {
         double avg_perf = std::accumulate(perfs.begin(), perfs.end(), 0.0) / perfs.size();
@@ -118,46 +118,43 @@ int main(int argc, char** argv) {
         int K;
         std::string description;
     };
-    
+
     // 定义测试用例
     std::vector<TestCase> test_cases = {
+        {1, 8, 32, "<1,32>*<32,8>"},
         {1, 6144, 2048, "<1,2048>*<2048,6144>"},
         {1, 2048, 6144, "<1,6144>*<6144,2048>"},
         {530, 6144, 2048, "<530,2048>*<2048,6144>"},
         {530, 2048, 6144, "<530,6144>*<6144,2048>"},
-        // {1, 3, 2048, "<1,2048>*<2048,3>"},
-        // {530, 3, 2048, "<530,2048>*<2048,3>"}
+        {1, 8, 2048, "<1,2048>*<2048,3>"},
+        {530, 8, 2048, "<530,2048>*<2048,3>"}
     };
-    
+
     std::vector<TestResult> all_test_results;
-    int iterations = 10;
-    
+    int iterations = 100;
+
     std::cout << "========================================\n";
     std::cout << "CUTLASS Blackwell 版本测试\n";
     std::cout << "========================================\n\n";
-    
+
     // 测试每个接口
     for (const auto& test_case : test_cases) {
         std::cout << "Testing Blackwell GEMM: " << test_case.description << std::endl;
         TestResult result = benchmark_blackwell_gemm_half(test_case.M, test_case.N, test_case.K, iterations);
         all_test_results.push_back(result);
-    }
-    
-    for (const auto& test_case : test_cases) {
-        std::cout << "Testing Blackwell GEMM+SiLU: " << test_case.description << std::endl;
-        TestResult result = benchmark_blackwell_gemm_silu_half(test_case.M, test_case.N, test_case.K, iterations);
-        all_test_results.push_back(result);
-    }
-    
-    for (const auto& test_case : test_cases) {
+
         std::cout << "Testing Blackwell GEMM+Bias: " << test_case.description << std::endl;
-        TestResult result = benchmark_blackwell_gemm_bias_half(test_case.M, test_case.N, test_case.K, iterations);
+        result = benchmark_blackwell_gemm_bias_half(test_case.M, test_case.N, test_case.K, iterations);
+        all_test_results.push_back(result);
+
+        std::cout << "Testing Blackwell GEMM+SiLU: " << test_case.description << std::endl;
+        result = benchmark_blackwell_gemm_silu_half(test_case.M, test_case.N, test_case.K, iterations);
         all_test_results.push_back(result);
     }
-    
+
     // 打印结果
     print_blackwell_results_table(all_test_results);
     std::cout << "\nAll Blackwell wrapper tests completed!\n";
-    
+
     return 0;
 }

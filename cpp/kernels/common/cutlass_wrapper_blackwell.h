@@ -16,23 +16,17 @@ namespace kernel {
 
 using namespace cute;
 using         ElementInputA    = cutlass::half_t;
-using         LayoutInputA     = cutlass::layout::RowMajor;
-constexpr int AlignmentA  = 128 / cutlass::sizeof_bits<ElementInputA>::value;
-
 using         ElementInputB    = cutlass::half_t;
-using         LayoutInputB     = cutlass::layout::RowMajor;
-constexpr int AlignmentB  = 128 / cutlass::sizeof_bits<ElementInputB>::value;
-
 using         ElementOutput    = cutlass::half_t;
-using         LayoutOutput     = cutlass::layout::RowMajor;
+
+constexpr int AlignmentA  = 128 / cutlass::sizeof_bits<ElementInputA>::value;
+constexpr int AlignmentB  = 128 / cutlass::sizeof_bits<ElementInputB>::value;
 constexpr int AlignmentOutput  = 128 / cutlass::sizeof_bits<ElementOutput>::value;
 
 using ElementAccumulator  = float;
 using ArchTag             = cutlass::arch::Sm100;
 using OperatorClass       = cutlass::arch::OpClassTensorOp;
 
-using MmaTileShape_MNK = Shape<_256,_128,_64>;
-using ClusterShape_MNK = Shape<_2,_2,_1>;
 
 template <bool kEnableSilu = false, bool kEnableBias = false>
 void cutlass_gemm_blackwell(ElementOutput* output,
@@ -40,8 +34,26 @@ void cutlass_gemm_blackwell(ElementOutput* output,
                             const ElementInputB* weights,
                             const ElementOutput* bias,
                             int M, int N, int K,
-                            cudaStream_t stream = 0);
+                            cudaStream_t stream = 0,
+                            bool use_cached = false);
 
+template <bool kEnableSilu = false, bool kEnableBias = false>
+void cutlass_gemv_blackwell(ElementOutput* output,
+                            const ElementInputA* input,
+                            const ElementInputB* weights,
+                            const ElementOutput* bias,
+                            int M, int N, int K,
+                            cudaStream_t stream = 0,
+                            bool use_cached = false);
+
+template <bool kEnableSilu, bool kEnableBias>
+void cutlass_blackwell_dispatch(ElementOutput* output,
+                            const ElementInputA* input,
+                            const ElementInputB* weights,
+                            const ElementOutput* bias,
+                            int M, int N, int K,
+                            cudaStream_t stream = 0,
+                            bool use_cached = false);
 
 } // namespace kernel
 } // namespace trt_edgellm

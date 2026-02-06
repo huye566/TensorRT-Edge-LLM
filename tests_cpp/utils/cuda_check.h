@@ -46,9 +46,9 @@ inline void print_device_info(int device_id = 0) {
     std::cout << indent_str << "Registers per Block: " << prop.regsPerBlock << "\n";
     std::cout << indent_str << "Warp Size: " << prop.warpSize << "\n";
     std::cout << indent_str << "Max Threads per Block: " << prop.maxThreadsPerBlock << "\n";
-    std::cout << indent_str << "Max Threads Dim: (" << prop.maxThreadsDim[0] << ", " 
+    std::cout << indent_str << "Max Threads Dim: (" << prop.maxThreadsDim[0] << ", "
               << prop.maxThreadsDim[1] << ", " << prop.maxThreadsDim[2] << ")\n";
-    std::cout << indent_str << "Max Grid Size: (" << prop.maxGridSize[0] << ", " 
+    std::cout << indent_str << "Max Grid Size: (" << prop.maxGridSize[0] << ", "
               << prop.maxGridSize[1] << ", " << prop.maxGridSize[2] << ")\n";
     std::cout << indent_str << "Clock Rate: " << prop.clockRate / 1000 << " MHz\n";
     std::cout << indent_str << "Memory Clock Rate: " << prop.memoryClockRate / 1000 << " MHz\n";
@@ -70,5 +70,38 @@ inline bool check_tensor_core_support() {
 
     return prop.major >= 7;
 }
+
+class GPUTimer {
+private:
+    cudaEvent_t start_;
+    cudaEvent_t stop_;
+
+public:
+    GPUTimer() {
+        cudaEventCreate(&start_);
+        cudaEventCreate(&stop_);
+    }
+
+    ~GPUTimer() {
+        cudaEventDestroy(start_);
+        cudaEventDestroy(stop_);
+    }
+
+    void start(cudaStream_t stream = 0) {
+        cudaEventRecord(start_, stream);
+    }
+
+    void stop(cudaStream_t stream = 0) {
+        cudaEventRecord(stop_, stream);
+    }
+
+    // 返回毫秒时间
+    float elapsed() {
+        float ms = 0;
+        cudaEventSynchronize(stop_);
+        cudaEventElapsedTime(&ms, start_, stop_);
+        return ms;
+    }
+};
 
 #endif // CUDA_CHECK_H

@@ -19,7 +19,7 @@ void print_gemm_results_table(const std::vector<TestResult>& results) {
     const int col11 = 20; // 验证元素数
     const int col12 = 10; // 正确性
     const int offset = 0;
-    
+
     int total_width = col1 + col2 + col3 + col4 + col5 + col6 + col7 + col8 + col9 + col10 + col11 + col12;
     total_width = total_width - offset * 12;
 
@@ -43,14 +43,14 @@ void print_gemm_results_table(const std::vector<TestResult>& results) {
               << std::setw(col11) << "VerifiedElements"
               << std::setw(col12) << "Check"
               << "\n";
-    
+
     std::cout << std::string(total_width, '-') << "\n";
-    
+
     // 打印每一行数据
     for (const auto& result : results) {
         std::ostringstream size_oss;
         size_oss << "(" << result.M << "," << result.K << ")*(" << result.K << "," << result.N << ")";
-        
+
         // 格式化验证元素数显示
         std::ostringstream verify_oss;
         int total_elements = result.M * result.N;
@@ -59,7 +59,7 @@ void print_gemm_results_table(const std::vector<TestResult>& results) {
         } else {
             verify_oss << result.verify_count;
         }
-        
+
         std::cout << std::left
                   << std::setw(col1 - offset) << result.test_case
                   << std::setw(col2 - offset) << result.data_type
@@ -82,25 +82,25 @@ void print_gemm_results_table(const std::vector<TestResult>& results) {
         }
         std::cout << "\n";
     }
-    
+
     std::cout << std::string(total_width, '-') << "\n";
-    
+
     // 打印统计信息
     int total_tests = results.size();
     int passed_tests = std::count_if(results.begin(), results.end(), [](const TestResult& r) { return r.passed; });
-    
+
     std::cout << "\n统计信息:\n";
     std::cout << "总测试数: " << total_tests << "\n";
     std::cout << "通过测试: " << passed_tests << "\n";
     std::cout << "失败测试: " << (total_tests - passed_tests) << "\n";
-    std::cout << "通过率: " << std::fixed << std::setprecision(1) 
+    std::cout << "通过率: " << std::fixed << std::setprecision(1)
               << (static_cast<double>(passed_tests) / total_tests * 100) << "%\n";
-    
+
     // 计算平均性能
     double avg_performance_fp16 = 0.0;
     double avg_performance_fp32 = 0.0;
     int count_fp16 = 0, count_fp32 = 0;
-    
+
     for (const auto& result : results) {
         if (result.data_type == "FP16") {
             avg_performance_fp16 += result.avg_tflops;
@@ -110,17 +110,17 @@ void print_gemm_results_table(const std::vector<TestResult>& results) {
             count_fp32++;
         }
     }
-    
+
     if (count_fp16 > 0) {
         avg_performance_fp16 /= count_fp16;
         std::cout << "FP16平均性能: " << std::fixed << std::setprecision(3) << avg_performance_fp16 << " TFLOPS\n";
     }
-    
+
     if (count_fp32 > 0) {
         avg_performance_fp32 /= count_fp32;
         std::cout << "FP32平均性能: " << std::fixed << std::setprecision(3) << avg_performance_fp32 << " TFLOPS\n";
     }
-    
+
     // 打印验证策略说明
     std::cout << "\n验证策略说明:\n";
     std::cout << "1. 当输出向量长度 > 10000 时，只计算和验证前10000个元素\n";
@@ -137,7 +137,7 @@ int main(int argc, char** argv) {
         int K;
         std::string description;
     };
-    
+
     std::vector<TestCase> test_cases = {
         {1, 6144, 2048, "<1,2048>*<2048,6144>"},
         {1, 2048, 6144, "<1,6144>*<6144,2048>"},
@@ -148,19 +148,19 @@ int main(int argc, char** argv) {
     };
     std::vector<TestResult> all_test_results;
     int iterations = 10;  // 减少迭代次数，因为GEMM测试较慢
-    
+
     for (const auto& test_case : test_cases) {
         std::cout << "Test Case: " << test_case.description << "\n";
         TestResult result = benchmark_gemm_half(test_case.M, test_case.N, test_case.K, iterations);
         all_test_results.push_back(result);
     }
-    
+
     for (const auto& test_case : test_cases) {
         std::cout << "Test Case: " << test_case.description << "\n";
         TestResult result = benchmark_gemm_float(test_case.M, test_case.N, test_case.K, iterations);
         all_test_results.push_back(result);
     }
-    
+
     print_gemm_results_table(all_test_results);
     std::cout << "\n\nAll tests completed!\n";
     return 0;
