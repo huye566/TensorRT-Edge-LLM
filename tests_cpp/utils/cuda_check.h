@@ -41,6 +41,7 @@ inline void print_device_info(int device_id = 0) {
     std::cout << indent_str << "========================================\n";
     std::cout << indent_str << "Device Name: " << prop.name << "\n";
     std::cout << indent_str << "Compute Capability: " << prop.major << "." << prop.minor << "\n";
+    std::cout << indent_str << "Number of SMs: " << prop.multiProcessorCount << "\n";
     std::cout << indent_str << "Total Global Memory: " << (prop.totalGlobalMem >> 20) << " MB\n";
     std::cout << indent_str << "Shared Memory per Block: " << (prop.sharedMemPerBlock >> 10) << " KB\n";
     std::cout << indent_str << "Registers per Block: " << prop.regsPerBlock << "\n";

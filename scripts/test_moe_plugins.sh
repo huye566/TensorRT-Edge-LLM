@@ -71,3 +71,6 @@ else
     echo "Execution failed with exit code $?."
     exit $?
 fi
+
+# https://docs.nvidia.com/nsight-compute/NsightComputeCli/index.html
+# CUDA_VISIBLE_DEVICES=2 ncu --set full --graph-profiling graph --target-processes all -o universal_operators -f ./build/tests_cpp/cublas/universal_operators/test_universal_operators

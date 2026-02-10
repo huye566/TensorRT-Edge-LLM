@@ -268,7 +268,7 @@ __device__ __forceinline__ __nv_bfloat162 fast_silu2(__nv_bfloat162 x) {
 }
 
 template<typename T, int VecSize>
-__global__ void silu_kernel_v2(T* data, int num) {
+__global__ static void silu_kernel_v2(T* data, int num) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int offset = tid * VecSize;
 
@@ -296,12 +296,20 @@ __global__ void silu_kernel_v2(T* data, int num) {
 }
 
 template<typename T, int VecSize>
-__global__ void silu_kernel_v3(T* __restrict__ input, int num) {
+__global__ static void silu_kernel_v3(T* __restrict__ input, int num) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     
     const int v_stride = stride * VecSize;
     int offset = tid * VecSize;
+
+    using T2 = std::conditional_t<std::is_same_v<T, half>, half2, __nv_bfloat162>;
+    T2 one;
+    if constexpr (std::is_same_v<T, half>) {
+        one = __float2half2_rn(1.0f);
+    } else {
+        one = __float2bfloat162_rn(1.0f);
+    }
 
     for (; offset + VecSize <= num; offset += v_stride) {
         if constexpr (std::is_same_v<T, float>) {
@@ -312,15 +320,6 @@ __global__ void silu_kernel_v3(T* __restrict__ input, int num) {
             v.w = v.w * __fdividef(1.0f, 1.0f + __expf(-v.w));
             reinterpret_cast<float4*>(input + offset)[0] = v;
         } else {
-            using T2 = std::conditional_t<std::is_same_v<T, half>, half2, __nv_bfloat162>;
-            
-            T2 one;
-            if constexpr (std::is_same_v<T, half>) {
-                one = __float2half2_rn(1.0f);
-            } else {
-                one = __float2bfloat162_rn(1.0f);
-            }
-
             float4 raw_data = reinterpret_cast<const float4*>(input + offset)[0];
             T2* regs = reinterpret_cast<T2*>(&raw_data);
 
@@ -336,15 +335,94 @@ __global__ void silu_kernel_v3(T* __restrict__ input, int num) {
     }
 
     // Tail handling
-    for (int i = offset + tid; i < num; i += stride) {
+    // for (int i = offset + tid; i < num; i += stride) {
+    //     float val = (float)input[i];
+    //     input[i] = (T)(val / (1.0f + __expf(-val)));
+    // }
+    int main_body_end = (num / VecSize) * VecSize;
+    for (int i = main_body_end + tid; i < num; i += stride) {
         float val = (float)input[i];
         input[i] = (T)(val / (1.0f + __expf(-val)));
     }
 }
 
+template<typename T, int VecSize, int Unroll = 2>
+__global__ static void silu_kernel_v4(T* __restrict__ input, int num) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    const int v_stride = stride * VecSize;
+    const int unroll_batch = v_stride * Unroll;
+    int offset = tid * VecSize;
+
+    using T2 = std::conditional_t<std::is_same_v<T, half>, half2, __nv_bfloat162>;
+    T2 one;
+    if constexpr (std::is_same_v<T, half>) {
+        one = __float2half2_rn(1.0f);
+    } else {
+        one = __float2bfloat162_rn(1.0f);
+    }
+    while (offset + (Unroll - 1) * v_stride + VecSize <= num) {
+        float4 v[Unroll];
+
+        // 批量读取
+        #pragma unroll
+        for (int i = 0; i < Unroll; ++i) {
+            v[i] = reinterpret_cast<const float4*>(input + offset + i * v_stride)[0];
+        }
+
+        #pragma unroll
+        for (int i = 0; i < Unroll; ++i) {
+            if constexpr (std::is_same_v<T, float>) {
+                v[i].x = v[i].x * __fdividef(1.0f, 1.0f + __expf(-v[i].x));
+                v[i].y = v[i].y * __fdividef(1.0f, 1.0f + __expf(-v[i].y));
+                v[i].z = v[i].z * __fdividef(1.0f, 1.0f + __expf(-v[i].z));
+                v[i].w = v[i].w * __fdividef(1.0f, 1.0f + __expf(-v[i].w));
+            } else {
+                T2* regs = reinterpret_cast<T2*>(&v[i]);
+                #pragma unroll
+                for (int j = 0; j < 4; j++) {
+                    regs[j] = __hmul2(regs[j], h2rcp(__hadd2(one, h2exp(__hneg2(regs[j])))));
+                }
+            }
+        }
+
+        // 批量写入
+        #pragma unroll
+        for (int i = 0; i < Unroll; ++i) {
+            reinterpret_cast<float4*>(input + offset + i * v_stride)[0] = v[i];
+        }
+
+        offset += unroll_batch;
+    }
+
+    while (offset + VecSize <= num) {
+        float4 v = reinterpret_cast<const float4*>(input + offset)[0];
+        if constexpr (std::is_same_v<T, float>) {
+            v.x = v.x * __fdividef(1.0f, 1.0f + __expf(-v.x));
+            v.y = v.y * __fdividef(1.0f, 1.0f + __expf(-v.y));
+            v.z = v.z * __fdividef(1.0f, 1.0f + __expf(-v.z));
+            v.w = v.w * __fdividef(1.0f, 1.0f + __expf(-v.w));
+        } else {
+            T2* regs = reinterpret_cast<T2*>(&v);
+            #pragma unroll
+            for (int j = 0; j < 4; j++) {
+                regs[j] = __hmul2(regs[j], h2rcp(__hadd2(one, h2exp(__hneg2(regs[j])))));
+            }
+        }
+        reinterpret_cast<float4*>(input + offset)[0] = v;
+        offset += v_stride;
+    }
+
+    int main_body_end = (num / VecSize) * VecSize;
+    for (int i = main_body_end + tid; i < num; i += stride) {
+        float val = (float)input[i];
+        input[i] = (T)(val / (1.0f + __expf(-val)));
+    }
+}
 
 template<typename T, int VecSize>
-__global__ void add_bias_kernel_v2(T* __restrict__ data, const T* __restrict__ bias, int m, int n) {
+__global__ static void add_bias_kernel_v2(T* __restrict__ data, const T* __restrict__ bias, int m, int n) {
     // 使用 2D 索引避免执行过程中计算 offset % n
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col_vec = blockIdx.x * blockDim.x + threadIdx.x;
@@ -371,7 +449,7 @@ __global__ void add_bias_kernel_v2(T* __restrict__ data, const T* __restrict__ b
 }
 
 template<typename T, int VecSize>
-__global__ void add_bias_kernel_v3(T* __restrict__ data, const T* __restrict__ bias, int m, int n) {
+__global__ static void add_bias_kernel_v3(T* __restrict__ data, const T* __restrict__ bias, int m, int n) {
     // 使用 2D 索引避免执行过程中计算 offset % n
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col_vec = blockIdx.x * blockDim.x + threadIdx.x;
@@ -400,16 +478,77 @@ __global__ void add_bias_kernel_v3(T* __restrict__ data, const T* __restrict__ b
     }
 }
 
+template<typename T, int VecSize, int RowsPerThread = 4>
+__global__ static void add_bias_kernel_v4(T* __restrict__ data, const T* __restrict__ bias, int m, int n) {
+    // blockDim.x = 128, VecSize = 8 (half), 128 * 8 * 2 bytes = 2KB Smem
+    extern __shared__ uint8_t smem_raw[];
+    T* shared_bias = reinterpret_cast<T*>(smem_raw);
+
+    int col_vec = blockIdx.x * blockDim.x + threadIdx.x;
+    int col = col_vec * VecSize;
+    int row_start = blockIdx.y * blockDim.y * RowsPerThread + threadIdx.y;
+
+    if (col < n) {
+        if constexpr (VecSize == 4 && std::is_same_v<T, float>) {
+            reinterpret_cast<float4*>(shared_bias)[threadIdx.x] = 
+                __ldg(reinterpret_cast<const float4*>(bias + col));
+        } else if constexpr (VecSize == 8) {
+            reinterpret_cast<float4*>(shared_bias)[threadIdx.x] = 
+                __ldg(reinterpret_cast<const float4*>(bias + col));
+        }
+    }
+    __syncthreads();
+
+    if (col < n) {
+        #pragma unroll
+        for (int i = 0; i < RowsPerThread; ++i) {
+            int cur_row = row_start + i * blockDim.y;
+            if (cur_row < m) {
+                int64_t offset = (int64_t)cur_row * n + col;
+                
+                if constexpr (std::is_same_v<T, float> && VecSize == 4) {
+                    float4 d = *reinterpret_cast<float4*>(data + offset);
+                    float4 b = reinterpret_cast<float4*>(shared_bias)[threadIdx.x];
+                    d.x += b.x; d.y += b.y; d.z += b.z; d.w += b.w;
+                    *reinterpret_cast<float4*>(data + offset) = d;
+                } 
+                else if constexpr (VecSize == 8) {
+                    using T2 = std::conditional_t<std::is_same_v<T, half>, half2, __nv_bfloat162>;
+                    float4 raw_d = reinterpret_cast<float4*>(data + offset)[0];
+                    float4 raw_b = reinterpret_cast<float4*>(shared_bias)[threadIdx.x];
+                    
+                    T2* d_reg = reinterpret_cast<T2*>(&raw_d);
+                    T2* b_reg = reinterpret_cast<T2*>(&raw_b);
+
+                    #pragma unroll
+                    for (int j = 0; j < 4; ++j) {
+                        d_reg[j] = __hadd2(d_reg[j], b_reg[j]);
+                    }
+                    reinterpret_cast<float4*>(data + offset)[0] = raw_d;
+                }
+            }
+        }
+    }
+}
 
 bool apply_silu_vec_optimized(void* data, int num, nvinfer1::DataType dtype, cudaStream_t stream) {
     auto launch = [&](auto type_tag) {
         using T = decltype(type_tag);
         constexpr int VecSize = (sizeof(T) == 4) ? 4 : 8;
         int threads = 256;
+#if 0
         int blocks = (num / VecSize + threads - 1) / threads;
         // silu_kernel_v2<T, VecSize><<<blocks, threads, 0, stream>>>(reinterpret_cast<T*>(data), num);
-        // size_t shared_mem_size = threads * VecSize * sizeof(T);
         silu_kernel_v3<T, VecSize><<<blocks, threads, 0, stream>>>(reinterpret_cast<T*>(data), num);
+#else
+        constexpr int Unroll = 2;
+        int blocks = 14 * 16;
+        // int blocks = 108 * 8;
+        int max_blocks = (num + (threads * VecSize) - 1) / (threads * VecSize);
+        blocks = std::min(blocks, max_blocks);
+        silu_kernel_v4<T, VecSize, Unroll><<<blocks, threads, 0, stream>>>(
+            reinterpret_cast<T*>(data), num);
+#endif
     };
     return launch_with_type(dtype, launch, "Optimized SiLU");
 }
@@ -428,7 +567,7 @@ bool apply_add_bias_vec_optimized(void* data, const void* bias, int m, int n,
                 reinterpret_cast<T*>(data), reinterpret_cast<const T*>(bias), m, n);
             return;
         }
-
+#if 0
         dim3 block(32, 8); // 优化线程块形状
         dim3 grid((n / VecSize + block.x - 1) / block.x, (m + block.y - 1) / block.y);
 
@@ -436,6 +575,16 @@ bool apply_add_bias_vec_optimized(void* data, const void* bias, int m, int n,
         //     reinterpret_cast<T*>(data), reinterpret_cast<const T*>(bias), m, n);
         add_bias_kernel_v3<T, VecSize><<<grid, block, 0, stream>>>(
             reinterpret_cast<T*>(data), reinterpret_cast<const T*>(bias), m, n);
+#else
+        dim3 block(128, 1);
+        constexpr int RowsPerThread = 2;
+        dim3 grid((n / VecSize + block.x - 1) / block.x, 
+                (m + (block.y * RowsPerThread) - 1) / (block.y * RowsPerThread));
+
+        size_t smem_size = block.x * VecSize * sizeof(T);
+        add_bias_kernel_v4<T, VecSize, RowsPerThread><<<grid, block, smem_size, stream>>>(
+            reinterpret_cast<T*>(data), reinterpret_cast<const T*>(bias), m, n);
+#endif
     };
     return launch_with_type(dtype, launch, "Optimized AddBias");
 }
