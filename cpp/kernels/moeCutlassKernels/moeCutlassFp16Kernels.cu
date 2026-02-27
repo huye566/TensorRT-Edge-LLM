@@ -98,6 +98,74 @@ __global__ void find_row_max_kernel(
     }
 }
 
+__global__ void decode_find_row_max_kernel(
+    const cutlass::half_t* matrix,
+    int* max_indices,
+    int M, int N, int real_N,
+    int interval,
+    cutlass::half_t* gate_weight,
+    cutlass::half_t* up_weight,
+    cutlass::half_t* down_weight,
+    cutlass::half_t** mlp_gate_weight,
+    cutlass::half_t** mlp_up_weight,
+    cutlass::half_t** mlp_down_weight) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < M) {
+        const cutlass::half_t* row_ptr = matrix + row * N;
+
+        cutlass::half_t max_val = row_ptr[0];
+        int max_idx = 0;
+        
+        #pragma unroll
+        for (int i = 1; i < real_N; i++) {
+            if (row_ptr[i] > max_val) {
+                max_val = row_ptr[i];
+                max_idx = i;
+            }
+        }
+        max_indices[row] = max_idx;
+        *mlp_gate_weight = gate_weight + interval * max_idx;
+        *mlp_up_weight   = up_weight + interval * max_idx;
+        *mlp_down_weight = down_weight + interval * max_idx;
+    }
+}
+
+__global__ void decode_compute_max_logit_kernel(
+    const half* router_logits,  // [num_tokens, experts_num]
+    int* expert_indices,        // [num_tokens]
+    int num_tokens,
+    int experts_num,
+    int interval,
+    half* gate_weight,
+    half* up_weight,
+    half* down_weight,
+    half** mlp_gate_weight,
+    half** mlp_up_weight,
+    half** mlp_down_weight) {
+    // half** d_mlp_gate_weight_ptr;
+    // cudaMallocManaged(&d_mlp_gate_weight_ptr, sizeof(half*));
+
+    int token_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (token_idx >= num_tokens) return;
+    
+    const half* token_logits = router_logits + token_idx * experts_num;
+    float max_logit = -INFINITY;
+    int best_expert = 0;
+    
+    for (int e = 0; e < experts_num; ++e) {
+        float logit = __half2float(token_logits[e]);
+        if (logit > max_logit) {
+            max_logit = logit;
+            best_expert = e;
+        }
+    }
+    
+    expert_indices[token_idx] = best_expert;
+    *mlp_gate_weight = gate_weight + interval * best_expert;
+    *mlp_up_weight   = up_weight + interval * best_expert;
+    *mlp_down_weight = down_weight + interval * best_expert;
+}
+
 // -------------------- 统计每个 expert 多少 token --------------------
 __global__ void kernel_count_tokens(const int32_t* expert_idx,
                                     int32_t* expert_count,   // 长度 = num_experts
@@ -676,7 +744,27 @@ void prefill_compute_router_logits_cublas(const MoeInputsParams& params) {
     CUDA_CHECK(cudaGetLastError());
 }
 
-void decode_compute_router_logits_cublas(const MoeInputsParams& params) {
+struct MlpWeights {
+    half* gate_weight;
+    half* up_weight;
+    half* down_weight;
+};
+
+void update_mlp_weights(const MoeInputsParams& params, MlpWeights &mlp_weights) {
+    int best_expert = 0;
+    cudaMemcpyAsync(&best_expert, params.expert_indices, sizeof(int), 
+                   cudaMemcpyDeviceToHost, params.stream);
+    cudaStreamSynchronize(params.stream);
+    mlp_weights.gate_weight = reinterpret_cast<half*>(params.gate_proj_weight) +
+        best_expert * params.intermediate_size * params.hidden_size;
+    mlp_weights.up_weight = reinterpret_cast<half*>(params.up_proj_weight) +
+        best_expert * params.intermediate_size * params.hidden_size;
+    mlp_weights.down_weight = reinterpret_cast<half*>(params.down_proj_weight) +
+        best_expert * params.intermediate_size * params.hidden_size;
+}
+
+void decode_compute_router_logits_cublas(const MoeInputsParams& params, 
+                                         MlpWeights &mlp_weights) {
     int num_tokens = params.total_tokens();
     int hidden_size = params.hidden_size;
     int experts_num = params.experts_num;
@@ -697,68 +785,146 @@ void decode_compute_router_logits_cublas(const MoeInputsParams& params) {
 
     dim3 block_router(256);
     dim3 grid_router((num_tokens + block_router.x - 1) / block_router.x);
+#if 0
+    half** d_mlp_gate_weight_ptr;
+    cudaMallocManaged(&d_mlp_gate_weight_ptr, sizeof(half*));
+    half** d_mlp_up_weight_ptr;
+    cudaMallocManaged(&d_mlp_up_weight_ptr, sizeof(half*));
+    half** d_mlp_down_weight_ptr;
+    cudaMallocManaged(&d_mlp_down_weight_ptr, sizeof(half*));
+    decode_compute_max_logit_kernel<<<grid_router, block_router, 0, params.stream>>>(
+        reinterpret_cast<const half*>(params.router_logits),
+        params.expert_indices,
+        num_tokens,
+        experts_num,
+        params.intermediate_size * params.hidden_size,
+        reinterpret_cast<half*>(params.gate_proj_weight),
+        reinterpret_cast<half*>(params.up_proj_weight),
+        reinterpret_cast<half*>(params.down_proj_weight),
+        d_mlp_gate_weight_ptr,
+        d_mlp_up_weight_ptr,
+        d_mlp_down_weight_ptr);
+    cudaStreamSynchronize(params.stream);
+    mlp_weights.gate_weight = *d_mlp_gate_weight_ptr;
+    mlp_weights.up_weight = *d_mlp_up_weight_ptr;
+    mlp_weights.down_weight = *d_mlp_down_weight_ptr;
+#else
     compute_max_logit_kernel<<<grid_router, block_router, 0, params.stream>>>(
         reinterpret_cast<const half*>(params.router_logits),
         params.expert_indices,
         num_tokens,
         experts_num);
+    update_mlp_weights(params, mlp_weights);
+#endif
 
     CUDA_CHECK(cudaGetLastError());
 }
 
-void decode_compute_router_logits_cutlas(const MoeInputsParams& params) {
-  int num_tokens = params.total_tokens();
-  int num_experts = params.experts_num;
-  int num_experts_padded = 8;
-  const cutlass::half_t* input_router =  reinterpret_cast<cutlass::half_t*>(params.hidden_state);
+void decode_compute_router_logits_cutlas(const MoeInputsParams& params,
+                                         MlpWeights &mlp_weights) {
+    int num_tokens = params.total_tokens();
+    int num_experts = params.experts_num;
+    int num_experts_padded = 8;
+    const cutlass::half_t* input_router =  reinterpret_cast<cutlass::half_t*>(params.hidden_state);
 
-  cutlass_gemv<false, true>(reinterpret_cast<cutlass::half_t*>(params.router_logits),
-            input_router,
-            reinterpret_cast<cutlass::half_t*>(params.router_weight),
-            reinterpret_cast<cutlass::half_t*>(params.router_bias),
-            num_tokens,
-            num_experts,
-            params.hidden_size,
-            params.stream);
-  CUDA_CHECK(cudaGetLastError());
+    cutlass_gemv<false, true>(reinterpret_cast<cutlass::half_t*>(params.router_logits),
+                input_router,
+                reinterpret_cast<cutlass::half_t*>(params.router_weight),
+                reinterpret_cast<cutlass::half_t*>(params.router_bias),
+                num_tokens,
+                num_experts,
+                params.hidden_size,
+                params.stream);
+    CUDA_CHECK(cudaGetLastError());
 
-  dim3 block_router(256);
-  dim3 grid_router((num_tokens + block_router.x - 1) / block_router.x);
-  find_row_max_kernel<<<grid_router, block_router, 0, params.stream>>>(
-      reinterpret_cast<const cutlass::half_t*>(params.router_logits),
-      params.expert_indices,
-      num_tokens, num_experts_padded, num_experts);
-  CUDA_CHECK(cudaGetLastError());
+    dim3 block_router(256);
+    dim3 grid_router((num_tokens + block_router.x - 1) / block_router.x);
+#if 0
+    half** d_mlp_gate_weight_ptr;
+    cudaMallocManaged(&d_mlp_gate_weight_ptr, sizeof(half*));
+    half** d_mlp_up_weight_ptr;
+    cudaMallocManaged(&d_mlp_up_weight_ptr, sizeof(half*));
+    half** d_mlp_down_weight_ptr;
+    cudaMallocManaged(&d_mlp_down_weight_ptr, sizeof(half*));
+    decode_find_row_max_kernel<<<grid_router, block_router, 0, params.stream>>>(
+        reinterpret_cast<const cutlass::half_t*>(params.router_logits),
+        params.expert_indices,
+        num_tokens, num_experts_padded, num_experts,
+        params.intermediate_size * params.hidden_size,
+        reinterpret_cast<cutlass::half_t*>(params.gate_proj_weight),
+        reinterpret_cast<cutlass::half_t*>(params.up_proj_weight),
+        reinterpret_cast<cutlass::half_t*>(params.down_proj_weight),
+        reinterpret_cast<cutlass::half_t**>(d_mlp_gate_weight_ptr),
+        reinterpret_cast<cutlass::half_t**>(d_mlp_up_weight_ptr),
+        reinterpret_cast<cutlass::half_t**>(d_mlp_down_weight_ptr));
+    cudaStreamSynchronize(params.stream);
+    mlp_weights.gate_weight = *d_mlp_gate_weight_ptr;
+    mlp_weights.up_weight = *d_mlp_up_weight_ptr;
+    mlp_weights.down_weight = *d_mlp_down_weight_ptr;
+#else
+    find_row_max_kernel<<<grid_router, block_router, 0, params.stream>>>(
+        reinterpret_cast<const cutlass::half_t*>(params.router_logits),
+        params.expert_indices,
+        num_tokens, num_experts_padded, num_experts);
+    update_mlp_weights(params, mlp_weights);
+#endif
+    CUDA_CHECK(cudaGetLastError());
 }
-void decode_compute_router_logits_cutlas_blackwell(const MoeInputsParams& params) {
-  int num_tokens = params.total_tokens();
-  int num_experts = params.experts_num;
-  int num_experts_padded = 8;
-  const cutlass::half_t* input_router =  reinterpret_cast<cutlass::half_t*>(params.hidden_state);
 
-  cutlass_gemv_blackwell<false, true>(reinterpret_cast<cutlass::half_t*>(params.router_logits),
-            input_router,
-            reinterpret_cast<cutlass::half_t*>(params.router_weights_padded),
-            reinterpret_cast<cutlass::half_t*>(params.router_bias_padded),
-            num_tokens,
-            num_experts_padded,
-            params.hidden_size,
-            params.stream);
-  CUDA_CHECK(cudaGetLastError());
+void decode_compute_router_logits_cutlas_blackwell(const MoeInputsParams& params,
+                                                   MlpWeights &mlp_weights) {
+    int num_tokens = params.total_tokens();
+    int num_experts = params.experts_num;
+    int num_experts_padded = 8;
+    const cutlass::half_t* input_router =  reinterpret_cast<cutlass::half_t*>(params.hidden_state);
 
-  dim3 block_router(256);
-  dim3 grid_router((num_tokens + block_router.x - 1) / block_router.x);
-  find_row_max_kernel<<<grid_router, block_router, 0, params.stream>>>(
-      reinterpret_cast<const cutlass::half_t*>(params.router_logits),
-      params.expert_indices,
-      num_tokens, num_experts_padded, num_experts);
-  CUDA_CHECK(cudaGetLastError());
+    cutlass_gemv_blackwell<false, true>(reinterpret_cast<cutlass::half_t*>(params.router_logits),
+                input_router,
+                reinterpret_cast<cutlass::half_t*>(params.router_weights_padded),
+                reinterpret_cast<cutlass::half_t*>(params.router_bias_padded),
+                num_tokens,
+                num_experts_padded,
+                params.hidden_size,
+                params.stream);
+    CUDA_CHECK(cudaGetLastError());
+
+    dim3 block_router(256);
+    dim3 grid_router((num_tokens + block_router.x - 1) / block_router.x);
+#if 0
+    half** d_mlp_gate_weight_ptr;
+    cudaMallocManaged(&d_mlp_gate_weight_ptr, sizeof(half*));
+    half** d_mlp_up_weight_ptr;
+    cudaMallocManaged(&d_mlp_up_weight_ptr, sizeof(half*));
+    half** d_mlp_down_weight_ptr;
+    cudaMallocManaged(&d_mlp_down_weight_ptr, sizeof(half*));
+    decode_find_row_max_kernel<<<grid_router, block_router, 0, params.stream>>>(
+        reinterpret_cast<const cutlass::half_t*>(params.router_logits),
+        params.expert_indices,
+        num_tokens, num_experts_padded, num_experts,
+        params.intermediate_size * params.hidden_size,
+        reinterpret_cast<cutlass::half_t*>(params.gate_proj_weight),
+        reinterpret_cast<cutlass::half_t*>(params.up_proj_weight),
+        reinterpret_cast<cutlass::half_t*>(params.down_proj_weight),
+        reinterpret_cast<cutlass::half_t**>(d_mlp_gate_weight_ptr),
+        reinterpret_cast<cutlass::half_t**>(d_mlp_up_weight_ptr),
+        reinterpret_cast<cutlass::half_t**>(d_mlp_down_weight_ptr));
+    cudaStreamSynchronize(params.stream);
+    mlp_weights.gate_weight = *d_mlp_gate_weight_ptr;
+    mlp_weights.up_weight = *d_mlp_up_weight_ptr;
+    mlp_weights.down_weight = *d_mlp_down_weight_ptr;
+#else
+    find_row_max_kernel<<<grid_router, block_router, 0, params.stream>>>(
+        reinterpret_cast<const cutlass::half_t*>(params.router_logits),
+        params.expert_indices,
+        num_tokens, num_experts_padded, num_experts);
+    update_mlp_weights(params, mlp_weights);
+#endif
+    CUDA_CHECK(cudaGetLastError());
 }
+
 void forward_mlp_cublas(half* output,
                         const half* input,
-                        const half* gate_weight,
-                        const half* up_weight,
-                        const half* down_weight,
+                        MlpWeights& mlp_weights,
                         half* gate_output,
                         half* up_output,
                         half* gate_mul_up_output,
@@ -776,14 +942,14 @@ void forward_mlp_cublas(half* output,
     cublas_gemm_silu<half>(cublas_wrapper.handle(),
                           num_tokens, intermediate_size, hidden_size,
                           input,
-                          gate_weight,
+                          mlp_weights.gate_weight,
                           gate_output,
                           MemoryFormat::ROW_MAJOR,
                           stream);
     cublas_gemm<half>(cublas_wrapper.handle(),
                      num_tokens, intermediate_size, hidden_size,
                      input,
-                     up_weight,
+                     mlp_weights.up_weight,
                      up_output,
                      MemoryFormat::ROW_MAJOR,
                      stream);
@@ -792,7 +958,7 @@ void forward_mlp_cublas(half* output,
     cublas_gemm<half>(cublas_wrapper.handle(),
                      num_tokens, hidden_size, intermediate_size,
                      gate_mul_up_output,
-                     down_weight,
+                     mlp_weights.down_weight,
                      output,
                      MemoryFormat::ROW_MAJOR,
                      stream);
@@ -804,28 +970,18 @@ void forward_moe_single_token_cublas(const MoeInputsParams& params) {
     int hidden_size = params.hidden_size;
     int intermediate_size = params.intermediate_size;
 
-    decode_compute_router_logits_cublas(params);
+    MlpWeights mlp_weights = {
+        .gate_weight = params.gate_proj_weight,
+        .up_weight = params.up_proj_weight,
+        .down_weight = params.down_proj_weight
+    };
 
-    int best_expert = 0;
-    cudaMemcpyAsync(&best_expert, params.expert_indices, sizeof(int),
-                   cudaMemcpyDeviceToHost, params.stream);
-    cudaStreamSynchronize(params.stream);
-
-    MOE_PRINT("[HOST INFO] Single token assigned to expert %d\n", best_expert);
-
-    const half* mlp_gate_weight = reinterpret_cast<const half*>(params.gate_proj_weight) +
-                                 best_expert * hidden_size * intermediate_size;
-    const half* mlp_up_weight = reinterpret_cast<const half*>(params.up_proj_weight) +
-                               best_expert * hidden_size * intermediate_size;
-    const half* mlp_down_weight = reinterpret_cast<const half*>(params.down_proj_weight) +
-                                 best_expert * intermediate_size * hidden_size;
+    decode_compute_router_logits_cublas(params, mlp_weights);
 
     forward_mlp_cublas(
         reinterpret_cast<half*>(params.output),
         reinterpret_cast<const half*>(params.hidden_state),
-        mlp_gate_weight,
-        mlp_up_weight,
-        mlp_down_weight,
+        mlp_weights,
         reinterpret_cast<half*>(params.silu_output),
         reinterpret_cast<half*>(params.up_output),
         reinterpret_cast<half*>(params.hadamard_output),
@@ -841,33 +997,25 @@ void forward_moe_single_token_cutlas(const MoeInputsParams& params) {
     int hidden_size = params.hidden_size;
     int intermediate_size = params.intermediate_size;
 
+    MlpWeights mlp_weights = {
+        .gate_weight = params.gate_proj_weight,
+        .up_weight = params.up_proj_weight,
+        .down_weight = params.down_proj_weight
+    };
+
 #ifdef SM_101
-    decode_compute_router_logits_cutlas_blackwell(params);
+    decode_compute_router_logits_cutlas_blackwell(params, mlp_weights);
 #else
-    decode_compute_router_logits_cutlas(params);
+    decode_compute_router_logits_cutlas(params, mlp_weights);
 #endif
-
-    int best_expert = 0;
-    cudaMemcpyAsync(&best_expert, params.expert_indices, sizeof(int),
-                   cudaMemcpyDeviceToHost, params.stream);
-    cudaStreamSynchronize(params.stream);
-
-    MOE_PRINT("[HOST INFO] Single token assigned to expert %d\n", best_expert);
-
-    const cutlass::half_t* mlp_gate_weight = reinterpret_cast<const cutlass::half_t*>(params.gate_proj_weight) +
-                                 best_expert * hidden_size * intermediate_size;
-    const cutlass::half_t* mlp_up_weight = reinterpret_cast<const cutlass::half_t*>(params.up_proj_weight) +
-                               best_expert * hidden_size * intermediate_size;
-    const cutlass::half_t* mlp_down_weight = reinterpret_cast<const cutlass::half_t*>(params.down_proj_weight) +
-                                 best_expert * intermediate_size * hidden_size;
 
 #ifdef SM_101
     forward_mlp_single_token_blackwell(
         reinterpret_cast<cutlass::half_t*>(params.output),
         reinterpret_cast<const cutlass::half_t*>(params.hidden_state),
-        mlp_gate_weight,
-        mlp_up_weight,
-        mlp_down_weight,
+        reinterpret_cast<const cutlass::half_t*>(mlp_weights.gate_weight),
+        reinterpret_cast<const cutlass::half_t*>(mlp_weights.up_weight),
+        reinterpret_cast<const cutlass::half_t*>(mlp_weights.down_weight),
         reinterpret_cast<cutlass::half_t*>(params.silu_output),
         reinterpret_cast<cutlass::half_t*>(params.up_output),
         reinterpret_cast<cutlass::half_t*>(params.hadamard_output),
@@ -879,9 +1027,9 @@ void forward_moe_single_token_cutlas(const MoeInputsParams& params) {
     forward_mlp_single_token(
         reinterpret_cast<cutlass::half_t*>(params.output),
         reinterpret_cast<const cutlass::half_t*>(params.hidden_state),
-        mlp_gate_weight,
-        mlp_up_weight,
-        mlp_down_weight,
+        reinterpret_cast<const cutlass::half_t*>(mlp_weights.gate_weight),
+        reinterpret_cast<const cutlass::half_t*>(mlp_weights.up_weight),
+        reinterpret_cast<const cutlass::half_t*>(mlp_weights.down_weight),
         reinterpret_cast<cutlass::half_t*>(params.silu_output),
         reinterpret_cast<cutlass::half_t*>(params.up_output),
         reinterpret_cast<cutlass::half_t*>(params.hadamard_output),

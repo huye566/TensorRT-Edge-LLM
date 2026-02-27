@@ -299,8 +299,9 @@ void inference_thread_func(InferenceTask* task)
     batchedRequest.topP = 1.0;
     batchedRequest.topK = 1;
     batchedRequest.maxGenerateLength = 200;
-    batchedRequest.saveSystemPromptKVCache = true;
+    batchedRequest.saveSystemPromptKVCache = false;
     batchedRequest.enableThinking = false;
+    batchedRequest.staticPrompt = false; // 用于控制是否使用历史prompt
 
     std::vector<void*> temp_device_image;
     for (int64_t batch_idx = 0; batch_idx < task->batch_size; ++batch_idx)

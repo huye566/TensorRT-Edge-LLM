@@ -142,7 +142,7 @@ int main(int argc, char** argv) {
     }
 
     std::vector<TestResult> all_test_results;
-    int iterations = 10;
+    int iterations = 100;
 
     std::cout << "===================================================\n";
     std::cout << "CUBLASLT NVFP4 GEMM 测试\n";

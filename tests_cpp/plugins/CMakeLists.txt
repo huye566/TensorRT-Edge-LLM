@@ -1,1 +1,2 @@
 add_subdirectory(moe_plugins)
+add_subdirectory(moe_nvfp4_plugins)

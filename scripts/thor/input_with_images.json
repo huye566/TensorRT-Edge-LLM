@@ -4,22 +4,69 @@
     "top_p": 1.0,
     "top_k": 1,
     "max_generate_length": 1024,
-    "default_system_prompt": "You are a helpful assistant.",
-    "messages": [
+    "requests": [
         {
-            "user": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回",
-            "system": "You are a helpful assistant.",
-            "images": ["/workspace/app/datasets/text_recog.jpg"]
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": "/opt/other/huye/datasets/text_recog.jpg"
+                        },
+                        {
+                            "type": "text",
+                            "text": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回"
+                        }
+                    ]
+                }
+            ]
         },
         {
-            "user": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回",
-            "system": "You are a helpful assistant.",
-            "images": ["/workspace/app/datasets/text_recog.jpg"]
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": "/opt/other/huye/datasets/text_recog.jpg"
+                        },
+                        {
+                            "type": "text",
+                            "text": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回"
+                        }
+                    ]
+                }
+            ]
         },
         {
-            "user": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回",
-            "system": "You are a helpful assistant.",
-            "images": ["/workspace/app/datasets/text_recog.jpg"]
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "image": "/opt/other/huye/datasets/text_recog.jpg"
+                        },
+                        {
+                            "type": "text",
+                            "text": "<image>\n请将图片中的文字内容提取出来，并以文本形式返回"
+                        }
+                    ]
+                }
+            ]
         }
     ]
 }

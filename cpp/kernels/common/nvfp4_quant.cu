@@ -1,9 +1,9 @@
 #include <cuda.h>
 #include <cuda_fp8.h>
 #include <cutlass/arch/config.h>
-#include <NvInfer.h>
 #include <stdexcept>
 #include <iostream>
+#include <kernels/common/nvfp4_quant.h>
 
 #ifdef SM_101
 #define CUTLASS_ARCH_MMA_SM100A_ENABLED 1

@@ -39,9 +39,9 @@ if [[ $vit_only -eq 1 ]]; then
     ${VIT_BUILD_PATH} \
     --onnxDir=${ONNX_DIR}/visual_enc_onnx_${VIT_QUANT_TYPE} \
     --engineDir=${ENGINE_DIR}/visual \
-    --minImageTokens=480 \
-    --maxImageTokens=480 \
-    --maxImageTokensPerImage=480
+    --minImageTokens=576 \
+    --maxImageTokens=576 \
+    --maxImageTokensPerImage=576
 fi
 
 if [[ $llm_only -eq 1 ]]; then
@@ -53,6 +53,6 @@ if [[ $llm_only -eq 1 ]]; then
     --maxInputLen=1024 \
     --maxKVCacheCapacity=4096 \
     --vlm \
-    --minImageTokens=480 \
-    --maxImageTokens=480
+    --minImageTokens=576 \
+    --maxImageTokens=576
 fi

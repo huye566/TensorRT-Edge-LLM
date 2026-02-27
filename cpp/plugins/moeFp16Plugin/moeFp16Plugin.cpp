@@ -173,6 +173,7 @@ bool MoeFp16Plugin::supportsFormatCombination(
             }
             default: break;
         }
+        // printf("[MoeFp16Plugin] %s: %s, %d\n", __FUNCTION__, status ? "SUCCESS" : "FAIL", pos);
         return status;
     } catch (std::exception const& e) {
         return false;

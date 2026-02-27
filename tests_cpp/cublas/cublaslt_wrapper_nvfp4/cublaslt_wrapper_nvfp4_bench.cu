@@ -353,8 +353,8 @@ bool cublaslt_gemm_nvfp4_run(
             output_type,
             stream);
     } else if (params.use_bias) {
-        // false, false
-        success = trt_edgellm::kernel::cublaslt_gemm_nvfp4<false, true>(
+        // false, true
+        success = trt_edgellm::kernel::cublaslt_gemm_nvfp4<false, false>(
             handle,
             params.M, params.N, params.K,
             d_A_fp4,

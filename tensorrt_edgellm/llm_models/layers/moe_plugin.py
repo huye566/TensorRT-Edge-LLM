@@ -64,13 +64,13 @@ moe_fp16_plugin_schema = OpSchema(
     ],
     attributes=[
         OpSchema.Attribute(
-            name="expert_num",
+            name="experts_num",
             type=OpSchema.AttrType.INT,
             description="Number of experts",
             required=True,
         ),
         OpSchema.Attribute(
-            name="expert_topk",
+            name="experts_topk",
             type=OpSchema.AttrType.INT,
             description="TopK number of experts",
             required=True,

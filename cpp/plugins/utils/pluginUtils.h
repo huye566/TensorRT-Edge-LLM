@@ -123,6 +123,22 @@ struct Serializer<T, typename std::enable_if_t<std::is_arithmetic_v<T> || std::i
         reinterpret_cast<char const*&>(*buffer) += sizeof(T);
         *buffer_size -= sizeof(T);
     }
+
+    static void serializeArray(void** buffer, T const* array, size_t count)
+    {
+        size_t bytes = sizeof(T) * count;
+        ::memcpy(*buffer, array, bytes);
+        reinterpret_cast<char*&>(*buffer) += bytes;
+    }
+
+    static void deserializeArray(void const** buffer, size_t* buffer_size, T* array, size_t count)
+    {
+        size_t bytes = sizeof(T) * count;
+        assert(*buffer_size >= bytes);
+        ::memcpy(array, *buffer, bytes);
+        reinterpret_cast<char const*&>(*buffer) += bytes;
+        *buffer_size -= bytes;
+    }
 };
 
 /*!
@@ -148,6 +164,18 @@ template <typename T>
 inline void deserializeValue(void const** buffer, size_t* buffer_size, T* value)
 {
     return Serializer<T>::deserialize(buffer, buffer_size, value);
+}
+
+template <typename T>
+inline void serializeArray(void** buffer, T const* array, size_t count)
+{
+    Serializer<T>::serializeArray(buffer, array, count);
+}
+
+template <typename T>
+inline void deserializeArray(void const** buffer, size_t* buffer_size, T* array, size_t count)
+{
+    Serializer<T>::deserializeArray(buffer, buffer_size, array, count);
 }
 
 //! @brief Accumulate workspace size for a given shape and data type. Device alignment will be applied automatically.

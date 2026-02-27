@@ -46,6 +46,131 @@ inline const char* cublasGetErrorString(cublasStatus_t status) {
     }                                                                   \
   }
 
+namespace nvfp4_debug {
+
+void print_half_array(const half* d_ptr, size_t count, const std::string& name, cudaStream_t stream) {
+    if (!d_ptr || count == 0) return;
+    half* h_ptr = new half[count];
+    cudaMemcpyAsync(h_ptr, d_ptr, count * sizeof(half), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+    std::cout << name << " [" << count << "]: ";
+    if (count > 10) {
+        for (size_t i = 0; i < 5; ++i) std::cout << __half2float(h_ptr[i]) << " ";
+        std::cout << "... ";
+        for (size_t i = count - 5; i < count; ++i) std::cout << __half2float(h_ptr[i]) << (i != count-1 ? " " : "");
+    } else {
+        for (size_t i = 0; i < count; ++i) std::cout << __half2float(h_ptr[i]) << (i != count-1 ? " " : "");
+    }
+    std::cout << std::endl;
+    delete[] h_ptr;
+}
+
+// 打印 device 上的 float 数组
+void print_float_array(const float* d_ptr, size_t count, const std::string& name, cudaStream_t stream) {
+    if (!d_ptr || count == 0) return;
+    float* h_ptr = new float[count];
+    cudaMemcpyAsync(h_ptr, d_ptr, count * sizeof(float), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+    std::cout << name << " [" << count << "]: ";
+    if (count > 10) {
+        for (size_t i = 0; i < 5; ++i) std::cout << std::setprecision(6) << h_ptr[i] << " ";
+        std::cout << "... ";
+        for (size_t i = count - 5; i < count; ++i) std::cout << std::setprecision(6) << h_ptr[i] << (i != count-1 ? " " : "");
+    } else {
+        for (size_t i = 0; i < count; ++i) std::cout << std::setprecision(6) << h_ptr[i] << (i != count-1 ? " " : "");
+    }
+    std::cout << std::endl;
+    delete[] h_ptr;
+}
+
+void print_bytes(const void* d_ptr, size_t total_bytes, const std::string& name, cudaStream_t stream) {
+    if (!d_ptr || total_bytes == 0) return;
+    uint8_t* h_bytes = new uint8_t[total_bytes];
+    cudaMemcpyAsync(h_bytes, d_ptr, total_bytes, cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+    std::cout << name << " [" << total_bytes << " bytes]: ";
+    if (total_bytes > 10) {
+        for (size_t i = 0; i < 5; ++i) std::cout << "0x" << std::hex << std::setw(2) << std::setfill('0') << (int)h_bytes[i] << " ";
+        std::cout << "... ";
+        for (size_t i = total_bytes - 5; i < total_bytes; ++i) std::cout << "0x" << std::hex << std::setw(2) << std::setfill('0') << (int)h_bytes[i] << (i != total_bytes-1 ? " " : "");
+    } else {
+        for (size_t i = 0; i < total_bytes; ++i) std::cout << "0x" << std::hex << std::setw(2) << std::setfill('0') << (int)h_bytes[i] << (i != total_bytes-1 ? " " : "");
+    }
+    std::cout << std::dec << std::endl;
+    delete[] h_bytes;
+}
+
+int getScalePadSize(int M, int N) {
+    int scale_n = N / 16;
+    int rounded_m = ((M + 128 - 1) / 128) * 128;
+    int rounded_n = ((scale_n + 4 - 1) / 4) * 4;
+    return rounded_m * rounded_n;
+}
+
+void print_gemm_debug_info(
+    int m, int n, int k,
+    const void* A,
+    const void* B,
+    const void* bias,
+    const void* a_scale,
+    const void* b_scale,
+    float alpha,
+    const void* output,
+    nvinfer1::DataType output_type,
+    cudaStream_t stream) {
+
+    cudaStreamSynchronize(stream);  // 确保所有数据就绪
+
+    std::cout << "\n========== NVFP4 GEMM Debug Info ==========\n";
+    std::cout << "m = " << m << ", n = " << n << ", k = " << k << "\n";
+    std::cout << "alpha = " << alpha << "\n";
+
+    size_t a_elems = static_cast<size_t>(m) * k / 2;
+    print_bytes(A, a_elems, "A (int64_t bytes)", stream);
+
+    size_t b_elems = static_cast<size_t>(n) * k / 2;
+    print_bytes(B, b_elems, "B (int64_t bytes)", stream);
+
+    if (a_scale) {
+        print_bytes(a_scale, getScalePadSize(m, k), "a_scale (FP8 bytes)", stream);
+    } else {
+        std::cout << "a_scale = nullptr\n";
+    }
+
+    if (b_scale) {
+        print_bytes(b_scale, getScalePadSize(n, k), "b_scale (FP8 bytes)", stream);
+    } else {
+        std::cout << "b_scale = nullptr\n";
+    }
+
+    if (bias) {
+        if (output_type == nvinfer1::DataType::kHALF) {
+            print_half_array(static_cast<const half*>(bias), n, "bias (half)", stream);
+        } else if (output_type == nvinfer1::DataType::kFLOAT) {
+            print_float_array(static_cast<const float*>(bias), n, "bias (float)", stream);
+        } else {
+            // bfloat16 或其他未知类型按字节打印
+            print_bytes(bias, n * sizeof(uint16_t), "bias (bytes)", stream);
+        }
+    } else {
+        std::cout << "bias = nullptr\n";
+    }
+
+    size_t out_elems = static_cast<size_t>(m) * n;
+    if (output_type == nvinfer1::DataType::kHALF) {
+        print_half_array(static_cast<const half*>(output), out_elems, "output (half)", stream);
+    } else if (output_type == nvinfer1::DataType::kFLOAT) {
+        print_float_array(static_cast<const float*>(output), out_elems, "output (float)", stream);
+    } else {
+        // bfloat16 或其他未知类型按字节打印
+        print_bytes(output, out_elems * sizeof(uint16_t), "output (bytes)", stream);
+    }
+
+    std::cout << "============================================\n" << std::flush;
+}
+
+} // namespace nvfp4_debug
+
 namespace trt_edgellm {
 namespace kernel {
 
@@ -188,7 +313,7 @@ bool cublaslt_gemm_nvfp4_impl(
     cublasLtMatmulDesc_t operation_desc = nullptr;
     cudaDataType_t nvfp4DataType = CUDA_R_4F_E2M1;
     cudaDataType_t d_type = CUDA_R_32F;
-    if (params.compute_type == ComputeType::HALF) {
+    if (params.compute_type == Nvfp4ComputeType::HALF) {
         d_type = CUDA_R_16F;
     }
     CUBLASLT_CHECK(cublasLtMatmulDescCreate(&operation_desc, CUBLAS_COMPUTE_32F, CUDA_R_32F));
@@ -217,7 +342,7 @@ bool cublaslt_gemm_nvfp4_impl(
                                            &params.a_scale_mode, sizeof(params.a_scale_mode)));
     CUBLASLT_CHECK(cublasLtMatmulDescSetAttribute(operation_desc, CUBLASLT_MATMUL_DESC_B_SCALE_MODE,
                                         &params.b_scale_mode, sizeof(params.b_scale_mode)));
-    if (params.format == MemoryFormat::ROW_MAJOR) {
+    if (params.format == Nvfp4MemoryFormat::ROW_MAJOR) {
         CUBLASLT_CHECK(cublasLtMatmulDescSetAttribute(operation_desc, CUBLASLT_MATMUL_DESC_A_SCALE_POINTER,
                                                &scale_B_ptr, sizeof(scale_B_ptr)));
         CUBLASLT_CHECK(cublasLtMatmulDescSetAttribute(operation_desc, CUBLASLT_MATMUL_DESC_B_SCALE_POINTER,
@@ -254,7 +379,7 @@ bool cublaslt_gemm_nvfp4_impl(
     int rows_A, cols_A, lda;
     int rows_B, cols_B, ldb;
     int rows_D, cols_D, ldd;
-    if (params.format == MemoryFormat::ROW_MAJOR) {
+    if (params.format == Nvfp4MemoryFormat::ROW_MAJOR) {
         rows_A = k;
         cols_A = m;
         lda = k;
@@ -307,7 +432,7 @@ bool cublaslt_gemm_nvfp4_impl(
     cublasLtMatmulHeuristicResult_t heuristic_result = {};
     CublasLtNVFP4Wrapper& wrapper = CublasLtNVFP4Wrapper::instance();
 
-    if (params.format == MemoryFormat::ROW_MAJOR) {
+    if (params.format == Nvfp4MemoryFormat::ROW_MAJOR) {
         CUBLASLT_CHECK(cublasLtMatmulAlgoGetHeuristic(
             handle, operation_desc, B_desc, A_desc, D_desc, D_desc,
             preference, 1, &heuristic_result, &returned_results));
@@ -386,20 +511,20 @@ bool cublaslt_gemm_nvfp4(
 
     switch (output_type) {
         case nvinfer1::DataType::kHALF:
-            params.compute_type = ComputeType::HALF;
+            params.compute_type = Nvfp4ComputeType::HALF;
             break;
         case nvinfer1::DataType::kBF16:
-            params.compute_type = ComputeType::FLOAT;
+            params.compute_type = Nvfp4ComputeType::FLOAT;
             break;
         case nvinfer1::DataType::kFLOAT:
-            params.compute_type = ComputeType::FLOAT;
+            params.compute_type = Nvfp4ComputeType::FLOAT;
             break;
         default:
             std::cerr << "Unsupported output type for NVFP4 GEMM" << std::endl;
             return false;
     }
 
-    params.format = MemoryFormat::ROW_MAJOR;
+    params.format = Nvfp4MemoryFormat::ROW_MAJOR;
     params.trans_a = CUBLAS_OP_T;
     params.trans_b = CUBLAS_OP_N;
 
@@ -412,7 +537,17 @@ bool cublaslt_gemm_nvfp4(
     if (!success) {
         return false;
     }
-
+#if ENABLE_MOE_DEBUG
+    nvfp4_debug::print_gemm_debug_info(
+        m, n, k,
+        A, B,
+        bias,
+        a_scale, b_scale,
+        alpha,
+        output,
+        output_type,
+        stream);
+#endif
     if (!kEnableBias && bias != nullptr) {
         success = apply_add_bias_vec_optimized(output, bias, m, n, output_type, stream);
         if (!success) {

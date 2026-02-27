@@ -249,15 +249,25 @@ def replace_torch_quant_linear_with_int4_plugin(model: nn.Module) -> nn.Module:
     return model
 
 
-def replace_torch_moe_module_with_moe_fp16_plugin(model: nn.Module, model_dir: str) -> nn.Module:
+def replace_torch_moe_module_with_moe_plugin(model: nn.Module, model_dir: str) -> nn.Module:
     from ..llm_models.layers.moe_plugin import (
             register_moe_fp16_plugin_onnx_symbolic_functions,
             replace_moe_fp16_module_with_plugin)
+    from ..llm_models.layers.moe_nvfp4_plugin import (
+            register_moe_nvfp4_plugin_onnx_symbolic_functions,
+            replace_moe_nvfp4_module_with_plugin)
+    from ..onnx_export.onnx_utils import is_fp4_quantized
+
     if not is_gptq_model(model):
         if _get_model_architectures(model_dir) == "SDQwen3VLMoeForConditionalGeneration":
-            print("Detected SDQwen3VLMoeForConditionalGeneration model, replacing TorchMoE with MoeFp16PluginModule")
-            register_moe_fp16_plugin_onnx_symbolic_functions()
-            model = replace_moe_fp16_module_with_plugin(model)
+            if is_fp4_quantized(model):
+                print("Detected SDQwen3VLMoeForConditionalGeneration model, replacing TorchMoE with MoeNvfp4PluginModule")
+                register_moe_nvfp4_plugin_onnx_symbolic_functions()
+                model = replace_moe_nvfp4_module_with_plugin(model)
+            else:
+                print("Detected SDQwen3VLMoeForConditionalGeneration model, replacing TorchMoE with MoeFp16PluginModule")
+                register_moe_fp16_plugin_onnx_symbolic_functions()
+                model = replace_moe_fp16_module_with_plugin(model)
     return model
 
 
@@ -513,7 +523,7 @@ def export_llm_model(model_dir: str,
         vocab_map=vocab_map)
 
     model = replace_torch_quant_linear_with_int4_plugin(model)
-    model = replace_torch_moe_module_with_moe_fp16_plugin(model, model_dir)
+    model = replace_torch_moe_module_with_moe_plugin(model, model_dir)
 
     # Create dummy inputs
     dummy_inputs = create_dummy_inputs(model,

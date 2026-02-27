@@ -1,10 +1,11 @@
 #!/bin/bash
 
-MODEL_PATH=/opt/update/Qwen3-VL-4B-MoE-Init
+# MODEL_PATH=/opt/other/huye/model/qwen3vl_2b
+MODEL_PATH=/opt/other/huye/model/qwen3vl_moe_4b
 ONNX_DIR=${MODEL_PATH}/vlm_onnx
 ENGINE_DIR=${MODEL_PATH}/engines
-VIT_QUANT_TYPE=fp16
-LLM_QUANT_TYPE=fp16
+VIT_QUANT_TYPE=fp8
+LLM_QUANT_TYPE=nvfp4
 CMAKE_CUDA_ARCHITECTURES=101a
 TENSORRT_DIR=/opt/update/trt10.13_new
 

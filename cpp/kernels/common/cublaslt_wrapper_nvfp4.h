@@ -17,12 +17,12 @@
 namespace trt_edgellm {
 namespace kernel {
 
-enum class MemoryFormat {
+enum class Nvfp4MemoryFormat {
     ROW_MAJOR,
     COL_MAJOR
 };
 
-enum class ComputeType {
+enum class Nvfp4ComputeType {
     FLOAT,
     HALF,
     TFLOAT32,
@@ -102,8 +102,8 @@ private:
 
 // NVFP4 GEMM参数结构体
 struct NvFp4GemmParams {
-    MemoryFormat format;
-    ComputeType compute_type;
+    Nvfp4MemoryFormat format;
+    Nvfp4ComputeType compute_type;
     cublasLtMatmulMatrixScale_t a_scale_mode;
     cublasLtMatmulMatrixScale_t b_scale_mode;
     cublasLtMatmulMatrixScale_t c_scale_mode;
@@ -116,8 +116,8 @@ struct NvFp4GemmParams {
     EpilogueMode epilogue_mode;
 
     NvFp4GemmParams()
-        : format(MemoryFormat::ROW_MAJOR)
-        , compute_type(ComputeType::FLOAT)
+        : format(Nvfp4MemoryFormat::ROW_MAJOR)
+        , compute_type(Nvfp4ComputeType::FLOAT)
         , a_scale_mode(CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3)
         , b_scale_mode(CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3)
         , c_scale_mode(CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
@@ -129,23 +129,6 @@ struct NvFp4GemmParams {
         , trans_b(CUBLAS_OP_N)
         , epilogue_mode(EpilogueMode::NONE) {}
 };
-
-// 主要NVFP4 GEMM接口（A和B都是NVFP4）
-bool cublaslt_gemm_nvfp4_standard(
-    cublasLtHandle_t handle,
-    int m, int n, int k,
-    const void* A,                     // NVFP4输入A
-    const void* B,                     // NVFP4输入B
-    void* C,
-    void* D,
-    const void* bias,                  // 偏置（可选）
-    const nv_fp8_e4m3* a_scale,       // A的缩放因子
-    const nv_fp8_e4m3* b_scale,       // B的缩放因子
-    const nv_fp8_e4m3* c_scale,       // C的缩放因子
-    const nv_fp8_e4m3* d_scale,       // D的缩放因子
-    const nv_fp8_e4m3* d_out_scale,   // 输出缩放因子
-    const NvFp4GemmParams& params = NvFp4GemmParams(),
-    cudaStream_t stream = 0);
 
 template <bool kEnableSilu = false, bool kEnableBias = false>
 bool cublaslt_gemm_nvfp4(
