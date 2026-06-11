@@ -37,6 +37,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "profiler/cupti_profiler.hpp"
 
 using namespace trt_edgellm;
 using Json = nlohmann::json;
@@ -44,9 +45,10 @@ using Json = nlohmann::json;
 // 模型封装类
 class VLModel
 {
-private:
+public:
     VLMModelInfo model_info;
 
+private:
     std::unique_ptr<void, DlDeleter> pluginHandles;
     cudaStream_t stream;
     std::unique_ptr<rt::LLMInferenceRuntime> llmInferenceRuntime{nullptr};
@@ -298,10 +300,10 @@ void inference_thread_func(InferenceTask* task)
     batchedRequest.temperature = 0.0;
     batchedRequest.topP = 1.0;
     batchedRequest.topK = 1;
-    batchedRequest.maxGenerateLength = 200;
     batchedRequest.saveSystemPromptKVCache = false;
     batchedRequest.enableThinking = false;
-    batchedRequest.staticPrompt = false; // 用于控制是否使用历史prompt
+    batchedRequest.maxGenerateLength = 200;
+    batchedRequest.staticPrompt = g_model->model_info.extra_config.staticPrompt;
 
     std::vector<void*> temp_device_image;
     for (int64_t batch_idx = 0; batch_idx < task->batch_size; ++batch_idx)
@@ -375,7 +377,40 @@ void inference_thread_func(InferenceTask* task)
 
     // 运行推理
     auto infer_start = std::chrono::high_resolution_clock::now();
-    bool run_res = g_model->run_inference(batchedRequest, response);
+
+    bool run_res = false;
+    if (g_model->model_info.extra_config.cuptiProfileLevel > 0) {
+        std::vector<cpp_base_suite::profiler::MetricId> metrics;
+        int const level = g_model->model_info.extra_config.cuptiProfileLevel;
+        if (level == 1) {
+            metrics = cpp_base_suite::profiler::DefaultMetrics();
+        } else if (level == 2) {
+            metrics = cpp_base_suite::profiler::PerformanceProfileMetrics();
+        } else {
+            metrics = cpp_base_suite::profiler::MainProfileMetrics();
+        }
+
+        cpp_base_suite::profiler::CuptiProfiler profiler(metrics);
+        if (!profiler.Initialize())
+        {
+            LOG_WARNING("inference_thread_func(): Failed to initialize CUPTI profiler — running unprofiled.");
+            run_res = g_model->run_inference(batchedRequest, response);
+        } else {
+            run_res = profiler.ProfileMultiPass("qwen infer",
+                [&batchedRequest, &response](int /*pass*/) {
+                if (!g_model->run_inference(batchedRequest, response))
+                {
+                    LOG_ERROR("inference_thread_func: run_inference failed during profiling.");
+                }
+            });
+
+            LOG_INFO(profiler.FormatResults().c_str());
+            profiler.SaveToJson("vlm_profile.njson", cpp_base_suite::profiler::WriteMode::Append);
+        }
+    } else {
+        run_res = g_model->run_inference(batchedRequest, response);
+    }
+
     auto infer_end = std::chrono::high_resolution_clock::now();
     auto infer_dur = std::chrono::duration_cast<std::chrono::milliseconds>(infer_end - infer_start).count();
     LOG_INFO("g_model->run_inference cost %d ms", infer_dur);

@@ -4,6 +4,7 @@
     "top_p": 1.0,
     "top_k": 1,
     "max_generate_length": 1024,
+    "cupti_profile_level": 1,
     "requests": [
         {
             "messages": [

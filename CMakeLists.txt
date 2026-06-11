@@ -73,11 +73,11 @@ find_library(
   HINTS ${CUDA_DIR} ${CUDA_TARGET_DIR}
   PATH_SUFFIXES lib lib64 lib/stubs)
 
-find_library(CUBLAS_LIB cublas 
+find_library(CUBLAS_LIB cublas
   HINTS ${CUDA_DIR} ${CUDA_TARGET_DIR}
   PATH_SUFFIXES lib lib64 lib/stubs)
 
-find_library(CUBLASLT_LIB cublasLt 
+find_library(CUBLASLT_LIB cublasLt
   HINTS ${CUDA_DIR} ${CUDA_TARGET_DIR}
   PATH_SUFFIXES lib lib64 lib/stubs)
 
@@ -173,6 +173,11 @@ if(SM_101)
 else()
     message(STATUS "Is Not Blackwell Architecture")
 endif()
+
+set(TENSORRT_HOME ${TRT_PACKAGE_DIR}/usr)
+set(PLATFORM_THOR ON)
+add_subdirectory(${CMAKE_SOURCE_DIR}/3rdParty/cpp_base_suite)
+include_directories(${CMAKE_SOURCE_DIR}/3rdParty/cpp_base_suite/include)
 
 # Build Core libraries of the project. attentionPlugin shared library and
 # edgellmCore/edgellmTokenizer/edgellmBuilder static library will be generated.

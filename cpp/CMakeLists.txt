@@ -44,6 +44,7 @@ add_library(
   ${RUNTIME_CPP_SRCS}
   ${PROFILER_CPP_SRCS})
 target_include_directories(edgellmCore PRIVATE ${COMMON_INCLUDE_DIRS})
+target_link_libraries(edgellmCore PRIVATE cpp_base_suite_profiler)
 
 # Generate tokenizer C++ static library
 file(GLOB_RECURSE TOKENIZER_CPP_SRCS "tokenizer/*.cpp")

@@ -21,6 +21,7 @@ export EDGELLM_PLUGIN_PATH=${LLM_SDK_LIB_PATH}/libNvInfer_edgellm_plugin.so
 INPUT_JSON=${HOME_DIR}/scripts/thor/input_with_images.json
 
 # nsys profile -t cudnn,cublas,cuda,nvtx,osrt -s cpu -o moe_nvfp4_vlm --force-overwrite true \
+# ncu --export qwen3 --force-overwrite --set full \
 ${VLM_INFER_PATH} \
   --llmEnginePath=${ENGINE_DIR}/llm \
   --visualEnginePath=${ENGINE_DIR}/visual \
@@ -28,5 +29,5 @@ ${VLM_INFER_PATH} \
   --modelType=qwen3_vl \
   --inputFile ${INPUT_JSON} \
   --outputFile output.json \
-  --closeCudaGraph \
-  --dumpProfile
+  --dumpProfile \
+  --closeCudaGraph

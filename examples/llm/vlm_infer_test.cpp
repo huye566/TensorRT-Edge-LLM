@@ -453,9 +453,17 @@ std::pair<bool, bool> checkRoad(std::string const& pred_str, std::string const& 
     return {pred, gt};
 }
 
-void parseInputFile(std::string const& inputFilePath, std::vector<std::string>& inputStrings,
-    std::vector<std::vector<std::string>>& inputImages, std::vector<std::string>& groundTruth, int& batchSize,
-    int& maxLength)
+struct ParsedInput
+{
+    std::vector<std::string> inputStrings;
+    std::vector<std::vector<std::string>> imagePaths;
+    std::vector<std::string> groundTruth;
+    int batchSize{1};
+    int maxLength{256};
+    int cuptiProfileLevel{0};
+};
+
+void parseInputFile(std::string const& inputFilePath, ParsedInput& output)
 {
     Json inputData;
     std::ifstream inputFileStream(inputFilePath);
@@ -476,8 +484,9 @@ void parseInputFile(std::string const& inputFilePath, std::vector<std::string>& 
     }
 
     // Extract global parameters
-    batchSize = inputData.value("batch_size", 1);
-    maxLength = inputData.value("max_generate_length", 256);
+    output.batchSize = inputData.value("batch_size", 1);
+    output.maxLength = inputData.value("max_generate_length", 256);
+    output.cuptiProfileLevel = inputData.value("cupti_profile_level", 0);
 
     // Parse requests
     if (inputData.contains("requests") && inputData["requests"].is_array())
@@ -502,7 +511,7 @@ void parseInputFile(std::string const& inputFilePath, std::vector<std::string>& 
                         auto const& content = message["content"];
                         if (content.is_string())
                         {
-                            inputStrings.push_back(content.get<std::string>());
+                            output.inputStrings.push_back(content.get<std::string>());
                         }
                         else if (content.is_array())
                         {
@@ -518,7 +527,7 @@ void parseInputFile(std::string const& inputFilePath, std::vector<std::string>& 
                                 auto type = contentItem["type"].get<std::string>();
                                 if (type == "text")
                                 {
-                                    inputStrings.push_back(contentItem["text"].get<std::string>());
+                                    output.inputStrings.push_back(contentItem["text"].get<std::string>());
                                 }
                                 else if (type == "image")
                                 {
@@ -531,11 +540,11 @@ void parseInputFile(std::string const& inputFilePath, std::vector<std::string>& 
                                         "Content type must be 'text', 'image', but got: %s", type.c_str()));
                                 }
                             }
-                            inputImages.push_back(std::move(images));
+                            output.imagePaths.push_back(std::move(images));
                         }
                         if (message.contains("truth"))
                         {
-                            groundTruth.push_back(message["truth"].get<std::string>());
+                            output.groundTruth.push_back(message["truth"].get<std::string>());
                         }
                     }
                 }
@@ -611,13 +620,8 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    int max_length;
-    int batch_size;
-    std::vector<std::string> inputStrings;
-    std::vector<std::string> groundTruth;
-    std::vector<std::vector<std::string>> imagePaths;
-
-    parseInputFile(args.inputFile, inputStrings, imagePaths, groundTruth, batch_size, max_length);
+    ParsedInput input;
+    parseInputFile(args.inputFile, input);
 
     std::string visual_engine_path = args.visualEnginePath;
     std::string llm_engine_path = args.llmEnginePath;
@@ -660,9 +664,9 @@ int main(int argc, char* argv[])
         std::cerr << "cudaStreamCreate failed!" << std::endl;
         return -1;
     }
-    VLMModelInfo input_info{max_length, batch_size, model_type, "", visual_engine_path.c_str(), llm_engine_path.c_str(),
+    VLMModelInfo input_info{input.maxLength, input.batchSize, model_type, "", visual_engine_path.c_str(), llm_engine_path.c_str(),
         {args.isEagle3, "", 6, 10, 60}, loraWeights, (void*) (&stream),
-        {args.staticImageSize, args.staticPrompt, args.visCompressMode, args.keepRate}, args.dumpProfile, args.closeCudaGraph};
+        {args.staticImageSize, args.staticPrompt, input.cuptiProfileLevel, args.visCompressMode, args.keepRate}, args.dumpProfile, args.closeCudaGraph};
     // 初始化库
     if (!funcs.initialize(&input_info))
     {
@@ -680,19 +684,19 @@ int main(int argc, char* argv[])
 
     using clock = std::chrono::high_resolution_clock;
     auto start = clock::now();
-    for (size_t m = 0; m < inputStrings.size(); m += batch_size)
+    for (size_t m = 0; m < input.inputStrings.size(); m += input.batchSize)
     {
-        LOG_INFO("------------------%d/%d--------------------", m+1, inputStrings.size());
+        LOG_INFO("------------------%d/%d--------------------", m+1, input.inputStrings.size());
         InferenceBatchHandle* batch_handlers;
-        batch_handlers = new InferenceBatchHandle[batch_size];
-        for (int i = 0; i < batch_size; ++i)
+        batch_handlers = new InferenceBatchHandle[input.batchSize];
+        for (int i = 0; i < input.batchSize; ++i)
         {
-            init_batch(batch_handlers + i, inputStrings[m + i], imagePaths[m + i], max_length, model_type);
+            init_batch(batch_handlers + i, input.inputStrings[m + i], input.imagePaths[m + i], input.maxLength, model_type);
         }
 
         // 提交推理任务
         auto infer_start = clock::now();
-        InferenceTaskHandle* task = funcs.submit_query(batch_handlers, batch_size, nullptr);
+        InferenceTaskHandle* task = funcs.submit_query(batch_handlers, input.batchSize, nullptr);
         if (!task)
         {
             LOG_ERROR("任务提交失败: %s.", funcs.get_error());
@@ -707,7 +711,7 @@ int main(int argc, char* argv[])
         double infer_time_milli_sec = std::chrono::duration<double, std::milli>(infer_end - infer_start).count();
         if (result)
         {
-            for (int i = 0; i < batch_size; ++i)
+            for (int i = 0; i < input.batchSize; ++i)
             {
                 InferenceBatchHandle* handle = batch_handlers + i;
                 LOG_INFO("推理Token数：%d, 结果：%s.", handle->result->token_count, handle->result->text);
@@ -718,21 +722,21 @@ int main(int argc, char* argv[])
                 // If invalid UTF-8 detected, error message is returned and original text is logged
                 responseJson["output_text"] = sanitizeUtf8ForJson(outputText);
                 responseJson["request_idx"] = m + i;
-                responseJson["image"] = imagePaths[m][i];
+                responseJson["image"] = input.imagePaths[m][i];
                 responseJson["latency"] = infer_time_milli_sec;
                 responseJson["failed_reason"] = "";
                 outputData["responses"].push_back(responseJson);
 
-                if (!groundTruth.empty())
+                if (!input.groundTruth.empty())
                 {
-                    construct.add(checkConstruct(outputText, groundTruth[m + i]));
+                    construct.add(checkConstruct(outputText, input.groundTruth[m + i]));
                 }
             }
         }
         else
         {
             LOG_ERROR("获取结果失败: %s.", funcs.get_error());
-            for (int i = 0; i < batch_size; ++i)
+            for (int i = 0; i < input.batchSize; ++i)
             {
                 Json responseJson;
                 std::string outputText = "推理失败！";
@@ -740,29 +744,29 @@ int main(int argc, char* argv[])
                 // If invalid UTF-8 detected, error message is returned and original text is logged
                 responseJson["output_text"] = sanitizeUtf8ForJson(outputText);
                 responseJson["request_idx"] = m + i;
-                responseJson["image"] = imagePaths[m][i];
+                responseJson["image"] = input.imagePaths[m][i];
                 responseJson["latency"] = infer_time_milli_sec;
                 responseJson["failed_reason"] = outputText;
                 outputData["responses"].push_back(responseJson);
 
-                if (!groundTruth.empty())
+                if (!input.groundTruth.empty())
                 {
-                    construct.add(checkConstruct(outputText, groundTruth[m + i]));
+                    construct.add(checkConstruct(outputText, input.groundTruth[m + i]));
                 }
             }
         }
 
         // 清理资源
         funcs.release_task(task);
-        for (int i = 0; i < batch_size; ++i)
+        for (int i = 0; i < input.batchSize; ++i)
         {
             deinit_batch(batch_handlers + i);
         }
         delete[] batch_handlers;
         auto end = clock::now();
         double cost_time_sec = std::chrono::duration<double>(end - start).count();
-        double fps = (m + batch_size) / cost_time_sec;
-        if (!groundTruth.empty())
+        double fps = (m + input.batchSize) / cost_time_sec;
+        if (!input.groundTruth.empty())
         {
             LOG_INFO(construct.fmtString().c_str());
         }

@@ -24,17 +24,19 @@
 struct VlmExtraConfig
 {
     VlmExtraConfig() = default;
-    VlmExtraConfig(bool staticImageSize, bool staticPrompt, int visCompressMode, float keepRate)
+    VlmExtraConfig(bool staticImageSize, bool staticPrompt, int cuptiProfileLevel, int visCompressMode, float keepRate)
         : staticImageSize(staticImageSize)
         , staticPrompt(staticPrompt)
         , visCompressMode(visCompressMode)
         , keepRate(keepRate)
+        , cuptiProfileLevel(cuptiProfileLevel)
     {
     }
     bool staticImageSize = false; // 固定图像尺寸优化
     bool staticPrompt = false;    // 固定提示词优化
     int visCompressMode = 0;      // 0=不压缩, 1=vis pruner, 2=ali compress method
     float keepRate = 1.0f;
+    int cuptiProfileLevel = 0;   // 0-no profile, 1-Default, 2-performance, 3-all
 };
 
 #ifdef __cplusplus
