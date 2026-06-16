@@ -60,6 +60,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND TARGET cpp_base_suite_
             ${CMAKE_CURRENT_SOURCE_DIR}/include/profiler/cupti_profiler.hpp
             ${CMAKE_CURRENT_SOURCE_DIR}/include/profiler/metrics.hpp
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/profiler)
+
+        install(FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/include/logger.hpp
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
     endif()
 
     install(EXPORT cpp_base_suite-targets

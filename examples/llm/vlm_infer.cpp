@@ -38,6 +38,7 @@
 #include <utility>
 #include <vector>
 #include "profiler/cupti_profiler.hpp"
+#include "logger.hpp"
 
 using namespace trt_edgellm;
 using Json = nlohmann::json;
@@ -577,6 +578,7 @@ extern "C" API const char* vlm_get_error_message()
 extern "C" API void vlm_set_log_callback(VLMLogCallback cb)
 {
     gLogger.set_log_callback(cb);
+    cpp_base_suite::logger::SetLogCallback(cb);
 }
 
 extern "C" API const char* vlm_get_version()

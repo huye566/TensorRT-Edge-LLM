@@ -1,4 +1,5 @@
 #include "profiler/cupti_profiler.hpp"
+#include "logger.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -25,7 +26,7 @@ namespace profiler {
 
 static bool CheckCupti(CUptiResult result, const char* api_name) {
   if (result != CUPTI_SUCCESS) {
-    fprintf(stderr, "CUPTI error in %s: %d\n", api_name, result);
+    CBS_LOG_ERROR("CUPTI error in %s: %d", api_name, result);
     return false;
   }
   return true;
@@ -111,7 +112,7 @@ struct ActivityState {
     if (res != CUPTI_SUCCESS) {
       res = cuptiActivityEnable(CUPTI_ACTIVITY_KIND_KERNEL);
       if (res != CUPTI_SUCCESS) {
-        fprintf(stderr, "CUPTI: failed to enable activity kernel tracing (%d)\n", res);
+        CBS_LOG_ERROR("CUPTI: failed to enable activity kernel tracing (%d)", res);
         return false;
       }
     }
@@ -190,12 +191,12 @@ struct GlobalCuptiState {
 
     CUresult cu_result = cuCtxGetCurrent(&cuda_ctx);
     if (cu_result != CUDA_SUCCESS || !cuda_ctx) {
-      fprintf(stderr, "CUPTI Profiler: no active CUDA context\n");
+      CBS_LOG_ERROR("CUPTI Profiler: no active CUDA context");
       return false;
     }
     cu_result = cuCtxGetDevice(&cuda_device);
     if (cu_result != CUDA_SUCCESS) {
-      fprintf(stderr, "CUPTI Profiler: failed to get device\n");
+      CBS_LOG_ERROR("CUPTI Profiler: failed to get device");
       return false;
     }
 
@@ -232,7 +233,7 @@ struct GlobalCuptiState {
         return false;
       }
       chip_name = chip_params.pChipName;
-      fprintf(stderr, "CUPTI Profiler: chip = '%s'\n", chip_name.c_str());
+      CBS_LOG_INFO("CUPTI Profiler: chip = '%s'", chip_name.c_str());
     }
 
     {
@@ -246,12 +247,9 @@ struct GlobalCuptiState {
 
       CUptiResult res = cuptiProfilerGetCounterAvailability(&ca_params);
       if (res != CUPTI_SUCCESS) {
-        fprintf(stderr,
-                "CUPTI Profiler: cuptiProfilerGetCounterAvailability failed "
-                "(error %d).\n"
-                "  Fix: sudo sysctl kernel.perf_event_paranoid=0\n"
-                "  Or run as root.\n",
-                res);
+        CBS_LOG_ERROR("CUPTI Profiler: cuptiProfilerGetCounterAvailability failed "
+                      "(error %d). Fix: sudo sysctl kernel.perf_event_paranoid=0 "
+                      "or run as root.", res);
         return false;
       }
 
@@ -338,7 +336,7 @@ struct GlobalCuptiState {
       return false;
     }
     num_passes = passes_params.numOfPasses;
-    fprintf(stderr, "CUPTI Profiler: num passes = %zu\n", num_passes);
+    CBS_LOG_INFO("CUPTI Profiler: num passes = %zu", num_passes);
 
     host_initialized = true;
     return true;
@@ -534,7 +532,7 @@ bool CuptiProfiler::setConfigForPass(int pass_index) {
 
 bool CuptiProfiler::Start() {
   if (!impl_->initialized) {
-    fprintf(stderr, "CuptiProfiler: call Initialize() first\n");
+    CBS_LOG_ERROR("CuptiProfiler: call Initialize() first");
     return false;
   }
   if (impl_->started) return true;
@@ -554,7 +552,7 @@ bool CuptiProfiler::Start() {
   auto& activity = ActivityState::instance();
   if (!activity.enabled) {
     if (!activity.Enable()) {
-      fprintf(stderr, "CuptiProfiler: failed to enable Activity API\n");
+      CBS_LOG_ERROR("CuptiProfiler: failed to enable Activity API");
       return false;
     }
   }
@@ -621,10 +619,9 @@ bool CuptiProfiler::Stop(int pass_index) {
 
   // If multipass replay, caller needs to re-run and call Start() again.
   if (!all_submitted) {
-    fprintf(stderr,
-            "CUPTI Profiler: multipass replay — pass %d done, "
-            "need pass %d next. Call StartWithPass() and run workload again.\n",
-            pass_index, impl_->next_pass_index);
+    CBS_LOG_INFO("CUPTI Profiler: multipass replay — pass %d done, "
+                 "need pass %d next. Call StartWithPass() and run workload again.",
+                 pass_index, impl_->next_pass_index);
     return true;  // not done yet
   }
 
@@ -683,11 +680,11 @@ bool CuptiProfiler::ProfileMultiPass(
 
 bool CuptiProfiler::StartWithPass(int pass_index) {
   if (!impl_->initialized) {
-    fprintf(stderr, "CuptiProfiler: call Initialize() first\n");
+    CBS_LOG_ERROR("CuptiProfiler: call Initialize() first");
     return false;
   }
   if (impl_->started) {
-    fprintf(stderr, "CuptiProfiler: already started, call Stop() first\n");
+    CBS_LOG_ERROR("CuptiProfiler: already started, call Stop() first");
     return false;
   }
 
@@ -738,7 +735,7 @@ bool CuptiProfiler::ProfileOnePass(const std::string& range_name) {
 
 bool CuptiProfiler::PushRange(const std::string& name) {
   if (!impl_->started) {
-    fprintf(stderr, "CuptiProfiler: call Start() first\n");
+    CBS_LOG_ERROR("CuptiProfiler: call Start() first");
     return false;
   }
   if (impl_->is_nested) return true;  // no-op for nested instances
@@ -755,7 +752,7 @@ bool CuptiProfiler::PushRange(const std::string& name) {
 
 bool CuptiProfiler::PopRange() {
   if (!impl_->started) {
-    fprintf(stderr, "CuptiProfiler: call Start() first\n");
+    CBS_LOG_ERROR("CuptiProfiler: call Start() first");
     return false;
   }
   if (impl_->is_nested) return true;  // no-op for nested instances
@@ -869,7 +866,7 @@ bool CuptiProfiler::SaveToJson(const char* path, WriteMode mode) const {
 
     std::ofstream ofs(path);
     if (!ofs.is_open()) {
-      fprintf(stderr, "CuptiProfiler: cannot open '%s' for writing\n", path);
+      CBS_LOG_ERROR("CuptiProfiler: cannot open '%s' for writing", path);
       return false;
     }
     ofs << root.dump(2) << "\n";
@@ -893,8 +890,7 @@ bool CuptiProfiler::SaveToJson(const char* path, WriteMode mode) const {
     [path_str = std::string(path), line = std::move(json_line)]() {
       std::ofstream ofs(path_str, std::ios::app);
       if (!ofs.is_open()) {
-        fprintf(stderr, "CuptiProfiler: cannot open '%s' for append\n",
-                path_str.c_str());
+        CBS_LOG_ERROR("CuptiProfiler: cannot open '%s' for append", path_str.c_str());
         return;
       }
       ofs << line << "\n";
@@ -1026,7 +1022,7 @@ bool CuptiProfiler::extractResults() {
   size_t num_ranges = GetRangeCount();
 
   if (num_ranges == 0) {
-    fprintf(stderr, "CUPTI Profiler: no counter data available\n");
+    CBS_LOG_WARNING("CUPTI Profiler: no counter data available");
     return true;
   }
 

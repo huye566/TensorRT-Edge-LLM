@@ -10,7 +10,32 @@ This guide covers how to use the `CuptiProfiler` class from `cpp_base_suite` to 
   sudo sysctl kernel.perf_event_paranoid=0
   ```
 
-## Quick Start
+## Logging
+
+`cpp_base_suite` ships with a lightweight, standalone logger (`#include "logger.hpp"`).
+
+**Default behaviour**: all messages go to `stderr` (terminal).
+
+**Redirect to a file or host logger**: install a callback.  While a callback is
+installed, `stderr` output is suppressed and the callback receives every message:
+
+```cpp
+#include "logger.hpp"
+namespace cbs_log = cpp_base_suite::logger;
+
+// Route all cpp_base_suite messages through the host project's logger
+// (e.g. to a log file, syslog, or the trt_edgellm logger).
+cbs_log::SetLogCallback([](int level, const char* msg) {
+    my_host_logger.write(level, msg);
+});
+
+// Optionally raise the minimum level (default: kInfo).
+cbs_log::SetLogLevel(cbs_log::Level::kWarning);
+```
+
+Pass `nullptr` to `SetLogCallback` to restore the default `stderr` output.
+
+**Quick Start**
 
 ### Basic Usage — Manual Multi-Pass
 

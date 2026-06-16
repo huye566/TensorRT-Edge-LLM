@@ -137,6 +137,9 @@ class CuptiProfiler {
   // After all passes are complete, results are automatically extracted.
   std::vector<ProfilingResult> GetResults() const;
 
+  // Format results as a human-readable string (same content as PrintResults).
+  std::string FormatResults() const;
+
   // Print results to stdout in a human-readable table.
   // In AutoRange mode, prints kernel launch config alongside metrics.
   void PrintResults() const;
