@@ -1,0 +1,32 @@
+{
+    "batch_size": 1,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "top_k": 1,
+    "max_generate_length": 128,
+    "cupti_profile_level": 2,
+    "requests": [
+        {
+            "messages": [
+                {
+                    "role": "system",
+                    "content": ""
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "camera": "wide",
+                            "image": "/workspace/app/datasets/text_recog.jpg"
+                        },
+                        {
+                            "type": "text",
+                            "text": "<image>\n图片颜色是什么？"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
